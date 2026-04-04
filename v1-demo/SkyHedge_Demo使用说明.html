@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SkyHedge · Demo 使用说明</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 860px; margin: 0 auto; padding: 40px 32px; background: #fff; color: #1e293b; line-height: 1.7; }
+  h1 { font-size: 28px; font-weight: 800; color: #0f172a; border-bottom: 3px solid #4fc3f7; padding-bottom: 12px; margin-bottom: 8px; }
+  .subtitle { color: #64748b; font-size: 14px; margin-bottom: 36px; }
+  h2 { font-size: 19px; font-weight: 700; color: #0f172a; margin-top: 40px; margin-bottom: 12px; }
+  h3 { font-size: 15px; font-weight: 700; color: #1e40af; margin: 20px 0 8px; }
+  p { margin: 8px 0 12px; color: #334155; }
+  code { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; padding: 1px 6px; font-family: 'Consolas', monospace; font-size: 13px; color: #0f172a; }
+  .warn { background: #fff7ed; border: 1px solid #fb923c; border-radius: 8px; padding: 12px 16px; margin: 12px 0; color: #9a3412; font-size: 14px; }
+  .tip  { background: #f0fdf4; border: 1px solid #4ade80; border-radius: 8px; padding: 12px 16px; margin: 12px 0; color: #166534; font-size: 14px; }
+  .info { background: #eff6ff; border: 1px solid #93c5fd; border-radius: 8px; padding: 12px 16px; margin: 12px 0; color: #1e40af; font-size: 14px; }
+  .highlight { background: #fdf4ff; border: 1px solid #d946ef; border-radius: 8px; padding: 12px 16px; margin: 12px 0; color: #6b21a8; font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+  th { background: #f1f5f9; font-weight: 700; padding: 10px 14px; text-align: left; border: 1px solid #e2e8f0; }
+  td { padding: 9px 14px; border: 1px solid #e2e8f0; vertical-align: top; }
+
+  /* Flow steps */
+  .flow { margin: 20px 0; }
+  .flow-step { display: flex; gap: 16px; margin-bottom: 2px; }
+  .flow-left { display: flex; flex-direction: column; align-items: center; }
+  .step-badge { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; flex-shrink: 0; color: #fff; }
+  .step-line { width: 2px; flex: 1; min-height: 20px; background: #e2e8f0; margin: 4px 0; }
+  .flow-body { padding: 6px 0 20px; flex: 1; }
+  .flow-role { font-size: 12px; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .flow-title { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
+  .flow-desc { font-size: 14px; color: #475569; line-height: 1.65; }
+  .flow-desc strong { color: #0f172a; }
+  .money { background: #f0fdf4; border-radius: 4px; padding: 2px 8px; font-family: 'Consolas', monospace; font-size: 13px; color: #15803d; font-weight: 600; }
+  .star { background: #fdf4ff; border: 1px solid #d946ef; border-radius: 6px; padding: 10px 14px; margin: 8px 0; font-size: 14px; color: #6b21a8; }
+
+  /* Role table */
+  .role-p  { color: #0369a1; font-weight: 700; }
+  .role-u1 { color: #15803d; font-weight: 700; }
+  .role-u2 { color: #6d28d9; font-weight: 700; }
+  .role-r  { color: #b45309; font-weight: 700; }
+  .role-tp { color: #9d174d; font-weight: 700; }
+
+  /* Right panel guide */
+  .panel-section { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; margin: 12px 0; }
+  .panel-section h4 { margin: 0 0 8px; font-size: 14px; color: #0f172a; }
+  .panel-section p { margin: 4px 0; font-size: 13px; }
+
+  /* Status badges */
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 10px; font-family: 'Consolas', monospace; }
+  .badge-open    { background: #fef9c3; color: #854d0e; border: 1px solid #fde047; }
+  .badge-ended   { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+  .badge-active  { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+  .badge-paid    { background: #dcfce7; color: #166534; border: 1px solid #4ade80; }
+  .badge-expired { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+
+  hr { border: none; border-top: 1px solid #e2e8f0; margin: 36px 0; }
+  footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 13px; color: #94a3b8; }
+  ul { padding-left: 20px; color: #334155; }
+  li { margin-bottom: 5px; }
+</style>
+</head>
+<body>
+
+<h1>SkyHedge · Demo 使用说明</h1>
+<div class="subtitle">FT5004 Group 5 · 网页操作指南</div>
+
+<!-- ─── ROLES ─────────────────────────────────── -->
+<h2>一、角色与账号对照表</h2>
+<p>Demo需要在 MetaMask 中切换账号来扮演不同角色。每次切换Tab前，<strong>必须先在 MetaMask 切换到对应账号</strong>，然后点击网页右上角 <strong>🔌 Switch Account</strong> 按钮使其生效。</p>
+
+<table>
+  <tr><th>角色</th><th>MetaMask账号名</th><th>地址（前6位）</th><th>负责操作</th></tr>
+  <tr><td><span class="role-p">✈️ Passenger</span></td><td>Passenger</td><td><code>0x7099…</code></td><td>创建保单、转让 Policy NFT</td></tr>
+  <tr><td><span class="role-u1">🏦 Underwriter 1</span></td><td>Underwriter_1</td><td><code>0x3C44…</code></td><td>出价（故意出高价，被UW2击败）</td></tr>
+  <tr><td><span class="role-u2">🏦 Underwriter 2</span></td><td>Underwriter_2</td><td><code>0x90F7…</code></td><td>出价（出低价赢得拍卖）、完成拍卖</td></tr>
+  <tr><td><span class="role-r">🔮 Resolver</span></td><td>Resolver</td><td><code>0xf39F…</code></td><td>提交延误数据、触发结算</td></tr>
+  <tr><td><span class="role-tp">👤 Third Party</span></td><td>Third_Party</td><td><code>0x15d3…</code></td><td>接收转让的 Policy NFT，代替乘客收款</td></tr>
+</table>
+
+<div class="tip">✅ <strong>操作前检查：</strong>每个Tab顶部有绿色横幅显示"Connected as ✈️ Passenger"，说明账号正确。红色横幅说明账号不对，需要切换MetaMask账号再点Switch Account。</div>
+
+<hr>
+
+<!-- ─── STATUS ──────────────────────────────── -->
+<h2>二、状态说明</h2>
+<p>保单在整个生命周期中会经过以下状态：</p>
+<table>
+  <tr><th>状态</th><th>含义</th><th>可执行操作</th></tr>
+  <tr><td><span class="badge badge-open">BIDDING — OPEN</span></td><td>拍卖进行中</td><td>UW可以出价（Bid）</td></tr>
+  <tr><td><span class="badge badge-ended">BIDDING — ENDED</span></td><td>拍卖已截止，等待胜出者完成拍卖</td><td>胜出UW可以Finalize</td></tr>
+  <tr><td><span class="badge badge-active">ACTIVE</span></td><td>抵押金已锁定，等待Oracle结算</td><td>Resolver可以Resolve</td></tr>
+  <tr><td><span class="badge badge-paid">PAID</span></td><td>航班延误，赔款已打给Policy NFT持有人</td><td>结束</td></tr>
+  <tr><td><span class="badge badge-expired">EXPIRED</span></td><td>航班正常，抵押金已退还给Risk NFT持有人</td><td>结束</td></tr>
+</table>
+
+<hr>
+
+<!-- ─── FULL FLOW ───────────────────────────── -->
+<h2>三、完整 Demo 流程（约8步）</h2>
+
+<div class="info">ℹ️ <strong>Demo参数建议：</strong>Fixed Payout = <code>0.5 ETH</code>，Max Premium = <code>0.05 ETH</code>，Delay Threshold = <code>60 min</code>，Auction End = 当前时间 + 2分钟（等待时间短）。</div>
+
+<div class="flow">
+
+  <!-- Step 1 -->
+  <div class="flow-step">
+    <div class="flow-left">
+      <div class="step-badge" style="background:#0369a1;">1</div>
+      <div class="step-line"></div>
+    </div>
+    <div class="flow-body">
+      <div class="flow-role role-p">✈️ Passenger Tab</div>
+      <div class="flow-title">创建保单，支付 Max Premium 进入托管</div>
+      <div class="flow-desc">
+        切换到 Passenger 账号 → 点 Switch Account → 切换到 Passenger Tab<br>
+        填写表单：
+        <ul>
+          <li>Flight Ref：<strong>SQ321</strong></li>
+          <li>Delay Threshold：<strong>60</strong> min</li>
+          <li>Fixed Payout：<strong>0.5</strong> ETH（航班延误时的赔付金额）</li>
+          <li>Max Premium：<strong>0.05</strong> ETH（愿意支付的最高保费）</li>
+          <li>Auction End：当前时间 + <strong>2分钟</strong>（短拍卖期，便于Demo）</li>
+          <li>Policy Expiry：明天（比Auction End晚即可）</li>
+        </ul>
+        点 <strong>Create Policy</strong> → MetaMask 弹出，发送 <span class="money">0.05 ETH</span>（Max Premium进入合约托管）→ 确认。<br><br>
+        右侧Activity Log显示：<em>sent 0.0500 ETH (max premium escrowed)</em><br>
+        Policy状态变为 <span class="badge badge-open">BIDDING — OPEN</span>，记下 Policy ID（例如 #1）。
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2 -->
+  <div class="flow-step">
+    <div class="flow-left">
+      <div class="step-badge" style="background:#15803d;">2</div>
+      <div class="step-line"></div>
+    </div>
+    <div class="flow-body">
+      <div class="flow-role role-u1">🏦 Underwriter 1 Tab</div>
+      <div class="flow-title">UW1 出价（故意出高价）</div>
+      <div class="flow-desc">
+        MetaMask 切换到 Underwriter_1 → 点 Switch Account → 切换到 🏦 UW 1 Tab<br>
+        输入 Policy ID（<strong>#1</strong>）→ Load<br>
+        保费默认 <strong>0.02 ETH</strong>（高于UW2，将被击败）→ 点 <strong>Place Bid</strong> → 确认。<br><br>
+        右侧面板：Best Premium 显示 <span class="money">0.0200 ETH</span>，Best UW 显示 Underwriter 1。
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3 -->
+  <div class="flow-step">
+    <div class="flow-left">
+      <div class="step-badge" style="background:#6d28d9;">3</div>
+      <div class="step-line"></div>
+    </div>
+    <div class="flow-body">
+      <div class="flow-role role-u2">🏦 Underwriter 2 Tab</div>
+      <div class="flow-title">UW2 出更低价格，赢得拍卖</div>
+      <div class="flow-desc">
+        MetaMask 切换到 Underwriter_2 → Switch Account → 切换到 🏦 UW 2 Tab<br>
+        输入 Policy ID → Load<br>
+        保费默认 <strong>0.01 ETH</strong>（低于UW1）→ 点 <strong>Place Bid</strong> → 确认。<br><br>
+        右侧面板：Best Premium 变为 <span class="money">0.0100 ETH</span>，Best UW 变为 Underwriter 2。<br>
+        说明：这就是逆向拍卖——谁愿意收更少的保费，谁赢得承保权。
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 4 -->
+  <div class="flow-step">
+    <div class="flow-left">
+      <div class="step-badge" style="background:#6d28d9;">4</div>
+      <div class="step-line"></div>
+    </div>
+    <div class="flow-body">
+      <div class="flow-role role-u2">🏦 Underwriter 2 Tab（等待拍卖结束）</div>
+      <div class="flow-title">拍卖结束后，UW2 完成拍卖并锁定抵押金</div>
+      <div class="flow-desc">
+        等待约2分钟，状态变为 <span class="badge badge-ended">BIDDING — ENDED</span><br>
+        此时 Finalize Auction 按钮变为可点击（UW1的按钮仍然是灰色，因为只有胜出者可以Finalize）<br><br>
+        点击 <strong>Finalize Auction (lock 0.5000 ETH)</strong> → MetaMask 提示发送 <span class="money">0.5 ETH</span>（抵押金）→ 确认。<br><br>
+        合约自动完成（原子操作）：
+        <ul>
+          <li><span class="money">0.01 ETH</span> 保费 → 转给 Underwriter 2（收入）</li>
+          <li><span class="money">0.04 ETH</span> 退款 → 退还给 Passenger（Max 0.05 - Best 0.01 = 0.04）</li>
+          <li><span class="money">0.5 ETH</span> 抵押 → 锁在合约里</li>
+          <li>Policy NFT #1 → Mint 给 Passenger</li>
+          <li>Risk NFT #2 → Mint 给 Underwriter 2</li>
+        </ul>
+        状态变为 <span class="badge badge-active">ACTIVE</span>。右侧面板显示两个 NFT 的持有人。
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 5 - STAR -->
+  <div class="flow-step">
+    <div class="flow-left">
+      <div class="step-badge" style="background:#9d174d;">⭐</div>
+      <div class="step-line"></div>
+    </div>
+    <div class="flow-body">
+      <div class="flow-role role-p">✈️ Passenger Tab · Demo 核心亮点</div>
+      <div class="flow-title">乘客转让 Policy NFT 给第三方</div>
+      <div class="flow-desc">
+        <div class="star">
+          ⭐ <strong>这是整个Demo最重要的一步，体现了 Bearer Instrument（无记名凭证）的核心设计。</strong><br>
+          乘客临时取消行程，将索赔权转让给第三方。结算时赔款自动打给NFT当前持有人，无需任何人工操作。
+        </div>
+        MetaMask 切换回 Passenger → Switch Account → 切换到 ✈️ Passenger Tab<br>
+        在 Load Policy 框输入 Policy ID → Load（如果看不到Policy NFT转让区域，需要先Load）<br>
+        在 <strong>⭐ Transfer Policy NFT</strong> 区域：
+        <ul>
+          <li>点 <strong>Auto-fill Third Party address</strong>（自动填入Third Party地址）</li>
+          <li>NFT ID 已自动填入</li>
+          <li>点 <strong>Transfer Policy NFT</strong> → 确认</li>
+        </ul>
+        右侧面板：Policy NFT → 从 Passenger 变为 Third Party。
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 6 -->
+  <div class="flow-step">
+    <div class="flow-left">
+      <div class="step-badge" style="background:#b45309;">6</div>
+      <div class="step-line"></div>
+    </div>
+    <div class="flow-body">
+      <div class="flow-role role-r">🔮 Resolver Tab</div>
+      <div class="flow-title">Oracle 提交延误数据，触发结算</div>
+      <div class="flow-desc">
+        MetaMask 切换到 Resolver → Switch Account → 切换到 🔮 Resolver Tab<br>
+        输入 Policy ID → Load<br>
+        Actual Delay 填 <strong>120</strong>（分钟，超过阈值60分钟）<br>
+        点 <strong>Resolve Policy</strong> → 确认。<br><br>
+        合约自动判断：120 ≥ 60（阈值）→ <strong>延误成立</strong><br>
+        <span class="money">0.5 ETH</span> 自动打给 <strong>Policy NFT 当前持有人</strong>（Third Party，不是原来的Passenger）<br><br>
+        状态变为 <span class="badge badge-paid">PAID</span>。<br>
+        右侧 Activity Log 显示 received 0.5000 ETH → Policy NFT holder。
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 7 -->
+  <div class="flow-step">
+    <div class="flow-left">
+      <div class="step-badge" style="background:#64748b;">7</div>
+    </div>
+    <div class="flow-body">
+      <div class="flow-role" style="color:#475569">结算后 · 右侧面板余额验证</div>
+      <div class="flow-title">点击 ↻ Refresh，验证资金流向</div>
+      <div class="flow-desc">
+        点右侧 <strong>↻ Refresh</strong> 按钮刷新余额，验证：
+        <ul>
+          <li>Passenger：余额 ≈ 10000 - 0.05（付Max Premium）+ 0.04（退款）= <strong>9999.99 ETH</strong>（轻微减少，gas费）</li>
+          <li>Underwriter 2：余额 ≈ 10000 - 0.5（抵押）+ 0.5（抵押返还，航班正常时）+ 0.01（保费收入）= <strong>10000.01 ETH</strong>（净赚保费）</li>
+          <li>Third Party：余额 ≈ 10000 + <strong>0.5 ETH</strong>（收到赔款）</li>
+          <li>Resolver：轻微减少（只付了gas费）</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<hr>
+
+<!-- ─── ALT FLOW ───────────────────────────── -->
+<h2>四、备选演示：航班正常（EXPIRED 路径）</h2>
+<p>如果想演示"航班未延误"的情况，在 Step 6 中把 Actual Delay 改为 <strong>10</strong>（分钟，低于阈值60）：</p>
+<ul>
+  <li>合约判断：10 &lt; 60（阈值）→ <strong>未延误</strong></li>
+  <li><span class="money">0.5 ETH</span> 抵押金退还给 <strong>Risk NFT 持有人</strong>（Underwriter 2）</li>
+  <li>状态变为 <span class="badge badge-expired">EXPIRED</span></li>
+  <li>Underwriter 2 净赚 <span class="money">0.01 ETH</span> 保费，同时拿回 <span class="money">0.5 ETH</span> 抵押</li>
+</ul>
+
+<hr>
+
+<!-- ─── RIGHT PANEL ────────────────────────── -->
+<h2>五、右侧状态栏说明</h2>
+
+<div class="panel-section">
+  <h4>LIVE ACCOUNTS</h4>
+  <p>显示5个角色的实时余额（每6秒自动刷新）和NFT持有情况。当前连接的账号会有高亮边框和 <code>connected</code> 标签。点 <strong>↻ Refresh</strong> 立即刷新余额。</p>
+</div>
+
+<div class="panel-section">
+  <h4>POLICY #X · LIVE STATE</h4>
+  <p>显示当前加载的保单实时状态，包括：状态、金额、Auction End 时间、最低出价、NFT持有人。每5秒自动更新。</p>
+</div>
+
+<div class="panel-section">
+  <h4>ACTIVITY LOG</h4>
+  <p>记录所有链上交易，显示：哪个角色操作、做了什么、发送了多少ETH、收到多少ETH、gas费是多少。最多保留40条记录。</p>
+</div>
+
+<hr>
+
+<!-- ─── TROUBLESHOOTING ────────────────────── -->
+<h2>六、常见问题</h2>
+
+<table>
+  <tr><th>问题</th><th>解决方法</th></tr>
+  <tr><td>网页显示"Contract not found"</td><td>重启节点后需要重新deploy，然后更新 config.js 里的合约地址</td></tr>
+  <tr><td>Tab顶部显示红色⚠️横幅</td><td>MetaMask当前账号不对，切换到正确账号再点Switch Account</td></tr>
+  <tr><td>Finalize按钮是灰色的</td><td>可能是：①拍卖还没结束（等Auction End时间到）②当前账号不是胜出的UW</td></tr>
+  <tr><td>Policy NFT转让后右侧还显示旧持有人</td><td>点 ↻ Refresh 刷新，或等待5秒自动更新</td></tr>
+  <tr><td>余额没有更新</td><td>点 ↻ Refresh 手动刷新</td></tr>
+  <tr><td>MetaMask交易一直pending</td><td>MetaMask → Settings → Advanced → Reset Account（清空本地交易历史，不影响资产）</td></tr>
+  <tr><td>重新创建新保单后右侧还显示旧NFT归属</td><td>正常，需要在新保单finalizeAuction后才会更新。Load新保单时会自动清空旧归属显示</td></tr>
+</table>
+
+<hr>
+
+<footer>SkyHedge · FT5004 Group 5 · SONG YUQIAO · SUN YINING · WANG XIAOLU</footer>
+
+</body>
+</html>
