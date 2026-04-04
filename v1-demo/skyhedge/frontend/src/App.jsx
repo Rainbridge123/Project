@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
-import { CONTRACT_ADDRESS, ABI, STATUS } from "./config";
+import { CONTRACT_ADDRESS, ABI, STATUS, READ_RPC_URL, DEPLOY_BLOCK } from "./config";
+
+const readProvider = READ_RPC_URL ? new ethers.JsonRpcProvider(READ_RPC_URL) : null;
+const readOnlyContract = readProvider ? new ethers.Contract(CONTRACT_ADDRESS, ABI, readProvider) : null;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ✈️ 乘客专属 Dashboard：蓝色科技感
@@ -281,7 +284,7 @@ function PolicySelectionList({
 // ─────────────────────────────────────────────────────────────────────────────
 // Sub-Tabs (PassengerTab, UnderwriterTab, ResolverTab - 逻辑保持原样)
 // ─────────────────────────────────────────────────────────────────────────────
-function PassengerTab({ contract, account, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh }) {
+function PassengerTab({ contract, readContract, account, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh }) {
   const [form, setForm] = useState({ flightRef: "SQ321", departureTime: nowPlusSeconds(3600), delayThreshold: "60", fixedPayout: "0.5", maxPremium: "0.05", auctionEnd: nowPlusSeconds(120), expiry: nowPlusSeconds(86400) });
   const [log, setLog] = useState({ msg: "", err: "" });
   const [policyId, setPolicyId] = useState(null);
@@ -319,7 +322,7 @@ function PassengerTab({ contract, account, addTxLog, setCurrentPolicy, setCurren
       if (pid === null) {
         throw new Error("PolicyCreated event not found in transaction receipt. Check that the connected network and configured contract address match the deployed SkyHedgeCore contract.");
       }
-      const p = await contract.getPolicy(pid);
+      const p = await (readContract ?? contract).getPolicy(pid);
       addTxLog(buildTxLog("passenger", `Created Policy #${pid} for flight ${form.flightRef}`));
       setPolicyId(pid); setPolicy(p); setCurrentPolicy(p); setCurrentPolicyId(pid); setLog({ msg: `Policy #${pid} created!` }); triggerBalanceRefresh();
     } catch (e) { setLog({ err: parseError(e) }); }
@@ -349,7 +352,7 @@ function PassengerTab({ contract, account, addTxLog, setCurrentPolicy, setCurren
   );
 }
 
-function UnderwriterTab({ contract, roleKey, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh, account }) {
+function UnderwriterTab({ contract, readContract, roleKey, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh, account }) {
   const [policyId, setPolicyId] = useState("");
   const [premium, setPremium] = useState("0.01");
   const [policy, setPolicy] = useState(null);
@@ -362,17 +365,19 @@ function UnderwriterTab({ contract, roleKey, addTxLog, setCurrentPolicy, setCurr
   const canFinalize = ds === "BIDDING_ENDED" && policy?.bestUnderwriter?.toLowerCase() === account?.toLowerCase();
 
   async function fetchPolicies() {
-    if (!contract) {
+    const reader = readContract ?? contract;
+    if (!reader) {
       setPolicyList([]);
+      setFinalizeList([]);
       return;
     }
     setIsPolicyListLoading(true);
     try {
-      const count = Number(await contract.policyCount());
+      const count = Number(await reader.policyCount());
       const loaded = await Promise.all(
         Array.from({ length: count }, async (_, index) => {
           const id = index + 1;
-          const item = await contract.getPolicy(id);
+          const item = await reader.getPolicy(id);
           return { id, policy: item };
         })
       );
@@ -396,13 +401,14 @@ function UnderwriterTab({ contract, roleKey, addTxLog, setCurrentPolicy, setCurr
 
   useEffect(() => {
     fetchPolicies();
-  }, [contract, account]);
+  }, [contract, readContract, account]);
 
   async function loadPolicy(targetPolicyId = policyId) {
-    if (!contract || !targetPolicyId) return;
+    const reader = readContract ?? contract;
+    if (!reader || !targetPolicyId) return;
     try {
       const normalizedId = String(targetPolicyId);
-      const p = await contract.getPolicy(normalizedId);
+      const p = await reader.getPolicy(normalizedId);
       setPolicyId(normalizedId);
       setPolicy(p); setCurrentPolicy(p); setCurrentPolicyId(BigInt(normalizedId));
     } catch (e) { setLog({ err: parseError(e) }); }
@@ -464,7 +470,7 @@ function UnderwriterTab({ contract, roleKey, addTxLog, setCurrentPolicy, setCurr
   );
 }
 
-function ResolverTab({ contract, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh, account }) {
+function ResolverTab({ contract, readContract, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh, account }) {
   const [policyId, setPolicyId] = useState("");
   const [delayMins, setDelayMins] = useState("120");
   const [policy, setPolicy] = useState(null);
@@ -474,17 +480,18 @@ function ResolverTab({ contract, addTxLog, setCurrentPolicy, setCurrentPolicyId,
   const canResolve = derivedStatus(policy) === "ACTIVE";
 
   async function fetchPolicies() {
-    if (!contract) {
+    const reader = readContract ?? contract;
+    if (!reader) {
       setPolicyList([]);
       return;
     }
     setIsPolicyListLoading(true);
     try {
-      const count = Number(await contract.policyCount());
+      const count = Number(await reader.policyCount());
       const loaded = await Promise.all(
         Array.from({ length: count }, async (_, index) => {
           const id = index + 1;
-          const item = await contract.getPolicy(id);
+          const item = await reader.getPolicy(id);
           return { id, policy: item };
         })
       );
@@ -498,13 +505,14 @@ function ResolverTab({ contract, addTxLog, setCurrentPolicy, setCurrentPolicyId,
 
   useEffect(() => {
     fetchPolicies();
-  }, [contract]);
+  }, [contract, readContract]);
 
   async function loadPolicy(targetPolicyId = policyId) {
-    if (!contract || !targetPolicyId) return;
+    const reader = readContract ?? contract;
+    if (!reader || !targetPolicyId) return;
     try {
       const normalizedId = String(targetPolicyId);
-      const p = await contract.getPolicy(normalizedId);
+      const p = await reader.getPolicy(normalizedId);
       setPolicyId(normalizedId);
       setPolicy(p); setCurrentPolicy(p); setCurrentPolicyId(BigInt(normalizedId));
     } catch (e) { setLog({ err: parseError(e) }); }
@@ -547,7 +555,7 @@ function ResolverTab({ contract, addTxLog, setCurrentPolicy, setCurrentPolicyId,
   );
 }
 
-function RightPanel({ contract, roleAddresses, currentPolicyId, txLog, account, refreshTick, activeMode }) {
+function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, txLog, account, refreshTick, activeMode }) {
   const [relatedPolicies, setRelatedPolicies] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [panelError, setPanelError] = useState("");
@@ -555,7 +563,8 @@ function RightPanel({ contract, roleAddresses, currentPolicyId, txLog, account, 
 
   useEffect(() => {
     async function fetchRelevantPolicies() {
-      if (!contract || !account) {
+      const reader = readContract ?? contract;
+      if (!reader || !account) {
         setRelatedPolicies([]);
         setPanelError("");
         return;
@@ -568,11 +577,11 @@ function RightPanel({ contract, roleAddresses, currentPolicyId, txLog, account, 
         let entries = [];
 
         if (activeMode === "passenger" || activeMode === "resolver") {
-          const count = Number(await contract.policyCount());
+          const count = Number(await reader.policyCount());
           const loaded = await Promise.all(
             Array.from({ length: count }, async (_, index) => {
               const id = index + 1;
-              const policy = await contract.getPolicy(id);
+              const policy = await reader.getPolicy(id);
               return { id, policy, ds: derivedStatus(policy) };
             })
           );
@@ -590,20 +599,51 @@ function RightPanel({ contract, roleAddresses, currentPolicyId, txLog, account, 
               }));
           }
         } else if (activeMode === "underwriter") {
-          const bidEvents = await contract.queryFilter(contract.filters.BidPlaced(null, account));
-          const uniqueIds = [...new Set(bidEvents.map(event => Number(event.args?.policyId)).filter(Boolean))];
-          const loaded = await Promise.all(
-            uniqueIds.map(async (id) => {
-              const policy = await contract.getPolicy(id);
-              const ds = derivedStatus(policy);
-              const isLeading = policy.bestUnderwriter?.toLowerCase() === normalizedAccount;
-              const relation = isLeading
-                ? (ds === "ACTIVE" ? "Underwritten by you" : "You are currently winning")
-                : "You placed a bid";
-              return { id, policy, ds, relation };
+          const count = Number(await reader.policyCount());
+          const allPolicies = await Promise.all(
+            Array.from({ length: count }, async (_, index) => {
+              const id = index + 1;
+              const policy = await reader.getPolicy(id);
+              return { id, policy, ds: derivedStatus(policy) };
             })
           );
-          entries = loaded;
+          try {
+            const latestBlock = await reader.runner.provider.getBlockNumber();
+            const fromBlock = latestBlock < DEPLOY_BLOCK ? 0 : DEPLOY_BLOCK;
+            const bidEvents = await reader.queryFilter(reader.filters.BidPlaced(null, account), fromBlock, latestBlock);
+            const participatedIds = new Set(bidEvents.map(event => Number(event.args?.policyId)).filter(Boolean));
+
+            entries = allPolicies
+              .filter(({ id }) => participatedIds.has(id))
+              .map(({ id, policy, ds }) => {
+                const isLeading = policy.bestUnderwriter?.toLowerCase() === normalizedAccount;
+                const relation = isLeading
+                  ? ds === "ACTIVE"
+                    ? "Underwritten by you"
+                    : ds === "BIDDING_ENDED"
+                      ? "Waiting for your finalization"
+                      : ds === "PAID" || ds === "EXPIRED"
+                        ? "Previously underwritten by you"
+                        : "You are currently winning"
+                  : "You placed a bid";
+                return { id, policy, ds, relation };
+              });
+          } catch {
+            entries = allPolicies
+              .filter(({ policy }) => policy.bestUnderwriter?.toLowerCase() === normalizedAccount)
+              .map(({ id, policy, ds }) => ({
+                id,
+                policy,
+                ds,
+                relation: ds === "ACTIVE"
+                  ? "Underwritten by you"
+                  : ds === "BIDDING_ENDED"
+                    ? "Waiting for your finalization"
+                    : ds === "PAID" || ds === "EXPIRED"
+                      ? "Previously underwritten by you"
+                      : "You are currently winning",
+              }));
+          }
         }
 
         setRelatedPolicies(sortPolicyEntries(entries));
@@ -615,7 +655,7 @@ function RightPanel({ contract, roleAddresses, currentPolicyId, txLog, account, 
     }
 
     fetchRelevantPolicies();
-  }, [contract, account, activeMode, refreshTick]);
+  }, [contract, readContract, account, activeMode, refreshTick]);
 
   const panelMeta = {
     passenger: { title: "YOUR POLICIES", accent: "#4fc3f7", empty: "You haven't created any policies yet." },
@@ -716,7 +756,7 @@ export default function App() {
       const nextContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
       setContract(nextContract);
       try {
-        const resolver = await nextContract.resolver();
+        const resolver = await (readOnlyContract ?? nextContract).resolver();
         setRoleAddresses(prev => ({ ...prev, resolver }));
         setActiveMode(resolver.toLowerCase() === accounts[0].toLowerCase() ? "resolver" : "passenger");
       } catch {}
@@ -732,7 +772,7 @@ export default function App() {
       const accounts = await prov.send("eth_requestAccounts", []);
       const signer = await prov.getSigner();
       const net = await prov.getNetwork();
-      const code = await prov.getCode(CONTRACT_ADDRESS);
+      const code = readProvider ? await readProvider.getCode(CONTRACT_ADDRESS) : await prov.getCode(CONTRACT_ADDRESS);
       setAccount(accounts[0]);
       setNetwork(`${net.name} (${net.chainId})`);
       if (code === "0x") {
@@ -744,7 +784,7 @@ export default function App() {
       const nextContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
       setContract(nextContract);
       try {
-        const resolver = await nextContract.resolver();
+        const resolver = await (readOnlyContract ?? nextContract).resolver();
         setRoleAddresses(prev => ({ ...prev, resolver }));
         setActiveMode(resolver.toLowerCase() === accounts[0].toLowerCase() ? "resolver" : "passenger");
       } catch {}
@@ -759,7 +799,7 @@ export default function App() {
     { key: "underwriter", label: "Underwriter", color: ROLE_META.underwriter.color },
     ...(isResolverAccount ? [{ key: "resolver", label: "Resolver", color: ROLE_META.resolver.color }] : []),
   ] : [];
-  const sharedProps = { contract, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh, account };
+  const sharedProps = { contract, readContract: readOnlyContract, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh, account };
 
   return (
     <div style={{ height: "100vh", background: "#0a0c10", color: "#e2e8f0", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -798,7 +838,7 @@ export default function App() {
             </>
           )}
         </div>
-        <RightPanel contract={contract} account={account} roleAddresses={roleAddresses} currentPolicyId={currentPolicyId} txLog={txLog} refreshTick={refreshTick} activeMode={activeMode} />
+        <RightPanel contract={contract} readContract={readOnlyContract} account={account} roleAddresses={roleAddresses} currentPolicyId={currentPolicyId} txLog={txLog} refreshTick={refreshTick} activeMode={activeMode} />
       </div>
     </div>
   );

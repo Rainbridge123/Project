@@ -1,5 +1,7 @@
 // frontend/src/config.js
-export const CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+export const CONTRACT_ADDRESS = "0x492f741eFD472dEe814DC82A51247DB4C6d80dAf";
+export const READ_RPC_URL = process.env.REACT_APP_SEPOLIA_RPC_URL || "";
+export const DEPLOY_BLOCK = 10587628;
 
 export const ABI = [
   // ── State-changing functions ────────────────────────────────────
