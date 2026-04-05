@@ -26,6 +26,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
  *
  * Status machine:
  *   BIDDING → (finalizeAuction) → ACTIVE → (resolvePolicy) → PAID | EXPIRED
+ *           ↘ (expireUnbidPolicy) → EXPIRED
  */
 contract SkyHedgeCore is ERC721, ReentrancyGuard {
 
@@ -231,6 +232,28 @@ contract SkyHedgeCore is ERC721, ReentrancyGuard {
         }
 
         emit AuctionFinalized(policyId, msg.sender, premiumEarned, refund, pNFTId, rNFTId);
+    }
+
+    /**
+     * @notice Expires an unbid policy after its expiry time and refunds maxPremium to passenger.
+     * @dev    Only the original passenger may reclaim escrow once the policy has expired with no bids.
+     */
+    function expireUnbidPolicy(uint256 policyId) external nonReentrant {
+        Policy storage policy = policies[policyId];
+        require(policy.status == Status.BIDDING,      "Policy not in BIDDING phase");
+        require(block.timestamp >= policy.expiry,     "Policy has not expired yet");
+        require(policy.bestUnderwriter == address(0), "Policy has bids");
+        require(msg.sender == policy.passenger,       "Only passenger can refund");
+
+        uint256 refund = policy.maxPremium;
+        address passenger = policy.passenger;
+
+        policy.status = Status.EXPIRED;
+
+        emit PolicyResolved(policyId, Status.EXPIRED, passenger, refund);
+
+        (bool ok, ) = passenger.call{value: refund}("");
+        require(ok, "Refund to passenger failed");
     }
 
     /**

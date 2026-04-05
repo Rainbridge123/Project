@@ -8,14 +8,19 @@
     "test": "hardhat test",
     "node": "hardhat node",
     "deploy:local": "hardhat run scripts/deploy.js --network localhost",
-    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia"
+    "deploy:sepolia": "hardhat run scripts/deploy-sepolia-chainlink.js --network sepolia",
+    "upload-don-secrets": "node scripts/upload-don-secrets.js",
+    "auto-settle:local": "hardhat run scripts/auto-settle.js --network localhost",
+    "auto-settle:local:once": "AUTO_SETTLE_ONCE=true hardhat run scripts/auto-settle.js --network localhost"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
-    "hardhat": "^2.22.0",
-    "dotenv": "^16.4.0"
+    "dotenv": "^16.4.0",
+    "hardhat": "^2.22.0"
   },
   "dependencies": {
+    "@chainlink/contracts": "^1.5.0",
+    "@chainlink/functions-toolkit": "^0.3.2",
     "@openzeppelin/contracts": "^4.9.0"
   }
 }

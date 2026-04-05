@@ -25,6 +25,8 @@ Both positions are tokenised as **ERC-721 Bearer Instruments**:
 | `bidPremium()` — reverse auction bidding | ✅ |
 | `finalizeAuction()` — winner locks full collateral, mints NFTs | ✅ |
 | `resolvePolicy()` — oracle triggers payout or collateral release | ✅ |
+| `scripts/auto-settle.js` — local off-chain worker auto-resolves due ACTIVE policies | ✅ |
+| `SkyHedgeCoreChainlink + SkyHedgeOracleCoordinator` — Sepolia Chainlink settlement path | ✅ |
 | Policy NFT (ERC-721) | ✅ |
 | Risk NFT (ERC-721) | ✅ |
 | NFT transfer → payout routes to current holder | ✅ |
@@ -93,11 +95,99 @@ Copy the deployed address.
 
 ### 6. Update frontend config
 
-Open `frontend/src/config.js` and paste the address:
+Create `frontend/.env` from the example and choose the target network:
 
-```js
-export const CONTRACT_ADDRESS = "0xABC…";
+```bash
+cd frontend
+cp .env.example .env
 ```
+
+For local Hardhat testing, use:
+
+```bash
+REACT_APP_NETWORK=localhost
+REACT_APP_LOCAL_RPC_URL=http://127.0.0.1:8545
+REACT_APP_LOCAL_CONTRACT_ADDRESS=0xABC...
+REACT_APP_LOCAL_DEPLOY_BLOCK=0
+```
+
+For Sepolia, switch to:
+
+```bash
+REACT_APP_NETWORK=sepolia
+REACT_APP_SEPOLIA_RPC_URL=YOUR_SEPOLIA_RPC_URL
+REACT_APP_SEPOLIA_CONTRACT_ADDRESS=0xABC...
+REACT_APP_SEPOLIA_DEPLOY_BLOCK=1234567
+```
+
+Restart `npm start` after changing `.env`.
+
+### 6.1 Run the auto-settlement worker
+
+This project now includes an off-chain resolver worker that can settle eligible `ACTIVE` policies automatically on `localhost`.
+
+The worker:
+- waits until `departureTime + delayThreshold`
+- loads the flight from AviationStack using `flight_iata`
+- reads the API delay field
+- calls `resolvePolicy(policyId, delayMins)` with the resolver wallet
+
+It only queries flights for policies that are already due, and it reuses one API response per flight per polling cycle to reduce quota usage.
+
+For local testing:
+
+```bash
+npm run auto-settle:local
+```
+
+To run it once and exit:
+
+```bash
+npm run auto-settle:local:once
+```
+
+Configuration:
+- `AVIATIONSTACK_API_KEY` in root `.env`, or `REACT_APP_AVIATIONSTACK_API_KEY` in `frontend/.env`
+- `AUTO_SETTLE_POLL_MS` in root `.env` if you want a custom poll interval
+
+Important:
+- the worker must run with the same wallet address configured as `resolver` in the contract
+- if AviationStack returns no usable numeric `delay` field yet, the worker skips that policy and retries on the next poll instead of settling with a guessed value
+
+### 6.2 Deploy the Sepolia Chainlink version
+
+This repository now supports two settlement modes:
+- `localhost`: existing resolver-driven MVP flow
+- `sepolia`: Chainlink Functions + Automation via `SkyHedgeCoreChainlink` and `SkyHedgeOracleCoordinator`
+
+Root `.env` values needed for the Sepolia deployment:
+
+```bash
+CHAINLINK_FUNCTIONS_ROUTER=...
+CHAINLINK_FUNCTIONS_DON_ID=...
+CHAINLINK_FUNCTIONS_SUBSCRIPTION_ID=...
+CHAINLINK_FUNCTIONS_CALLBACK_GAS_LIMIT=300000
+CHAINLINK_FUNCTIONS_DON_SECRETS_SLOT_ID=...
+CHAINLINK_FUNCTIONS_DON_SECRETS_VERSION=...
+```
+
+Deploy with:
+
+```bash
+npm run deploy:sepolia
+```
+
+The deployment script will:
+- deploy `SkyHedgeCoreChainlink`
+- deploy `SkyHedgeOracleCoordinator`
+- link the core contract to the coordinator
+
+After deployment you still need to:
+- fund the Functions subscription with LINK
+- add the coordinator as a Functions consumer
+- upload DON-hosted secrets for `{"apiKey":"YOUR_AVIATIONSTACK_KEY"}` and record the returned slot ID + version
+- register the coordinator as a Chainlink Automation upkeep
+- update `frontend/.env` with the new `REACT_APP_SEPOLIA_CONTRACT_ADDRESS`
 
 ### 7. Add Hardhat local network to MetaMask
 
@@ -122,15 +212,16 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Deploy to Sepolia (optional, for extra credit)
 
-1. Copy `.env.example` → `.env` and fill in your values.
+1. Copy `.env.example` → `.env` and fill in your Alchemy + Chainlink values.
 2. Run:
 
 ```bash
-npx hardhat run scripts/deploy.js --network sepolia
+npm run deploy:sepolia
 ```
 
-3. Update `frontend/src/config.js` with the Sepolia contract address.
-4. Push to GitHub → Vercel auto-deploys the frontend.
+3. Add the deployed coordinator to your Chainlink Functions subscription and Automation upkeep.
+4. Update `frontend/.env` with the Sepolia core address and set `REACT_APP_NETWORK=sepolia`.
+5. Push to GitHub → Vercel auto-deploys the frontend.
 
 ---
 

@@ -1,9 +1,33 @@
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
-import { CONTRACT_ADDRESS, ABI, STATUS, READ_RPC_URL, DEPLOY_BLOCK } from "./config";
+import { ACTIVE_NETWORK_KEY, ACTIVE_NETWORK_LABEL, CONTRACT_ADDRESS, ABI, COORDINATOR_ABI, STATUS, READ_RPC_URL, DEPLOY_BLOCK, EXPECTED_CHAIN_ID, AVIATIONSTACK_API_KEY, AVIATIONSTACK_BASE_URL } from "./config";
 
+const hasConfiguredAddress = Boolean(CONTRACT_ADDRESS) && ethers.isAddress(CONTRACT_ADDRESS);
 const readProvider = READ_RPC_URL ? new ethers.JsonRpcProvider(READ_RPC_URL) : null;
-const readOnlyContract = readProvider ? new ethers.Contract(CONTRACT_ADDRESS, ABI, readProvider) : null;
+const readOnlyContract = readProvider && hasConfiguredAddress ? new ethers.Contract(CONTRACT_ADDRESS, ABI, readProvider) : null;
+const BROWSER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "Local";
+const DEFAULT_FLIGHT_LOOKUP = {
+  flightRef: "SQ322",
+  airline: "Singapore Airlines",
+  flight_date: "2026-04-05",
+  flight_status: "scheduled",
+  departure_airport: "Singapore Changi",
+  departure_timezone: "Asia/Singapore",
+  departure_iata: "SIN",
+  departure_terminal: "3",
+  departure_scheduled: "2026-04-05T23:00:00+00:00",
+  departure_estimated: "2026-04-05T23:00:00+00:00",
+  departure_actual: null,
+  departure_delay_mins: null,
+  arrival_airport: "Heathrow",
+  arrival_timezone: "Europe/London",
+  arrival_iata: "LHR",
+  arrival_terminal: "2",
+  arrival_scheduled: "2026-04-06T05:55:00+00:00",
+  arrival_estimated: null,
+  arrival_actual: null,
+  arrival_delay_mins: null,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ✈️ 乘客专属 Dashboard：蓝色科技感
@@ -86,7 +110,10 @@ function derivedStatus(policy) {
   if (!policy || policy.passenger === ethers.ZeroAddress) return "UNKNOWN";
   const s = Number(policy.status);
   const now = Math.floor(Date.now() / 1000);
-  if (s === 0) return now < Number(policy.auctionEnd) ? "BIDDING_OPEN" : "BIDDING_ENDED";
+  if (s === 0) {
+    if (policy.bestUnderwriter === ethers.ZeroAddress && now >= Number(policy.expiry)) return "UNBID_EXPIRED";
+    return now < Number(policy.auctionEnd) ? "BIDDING_OPEN" : "BIDDING_ENDED";
+  }
   if (s === 1) return "ACTIVE";
   if (s === 2) return "PAID";
   if (s === 3) return "EXPIRED";
@@ -95,9 +122,10 @@ function derivedStatus(policy) {
 const DERIVED_META = {
   BIDDING_OPEN:  { label: "BIDDING — OPEN",  color: "#f59e0b", desc: "Auction open. Underwriters can place bids now." },
   BIDDING_ENDED: { label: "BIDDING — ENDED", color: "#ef4444", desc: "Auction closed. Winning underwriter must finalize." },
+  UNBID_EXPIRED: { label: "EXPIRED",         color: "#fb7185", desc: "No bids were placed. Passenger refund is still pending." },
   ACTIVE:        { label: "ACTIVE",           color: "#3b82f6", desc: "Collateral locked. Awaiting oracle resolution." },
   PAID:          { label: "PAID",             color: "#22c55e", desc: "Flight delayed. Payout sent to Policy NFT holder." },
-  EXPIRED:       { label: "EXPIRED",          color: "#6b7280", desc: "No delay. Collateral returned to Risk NFT holder." },
+  EXPIRED:       { label: "REFUNDED",         color: "#6b7280", desc: "Funds have already been returned to the rightful holder." },
   UNKNOWN:       { label: "UNKNOWN",          color: "#475569", desc: "" },
 };
 
@@ -116,6 +144,209 @@ function parseError(e) {
 function toBytes32(str) { return ethers.encodeBytes32String(str.slice(0, 31)); }
 function fromBytes32(hex) { try { return ethers.decodeBytes32String(hex); } catch { return hex; } }
 function shortAddr(addr) { return addr ? addr.slice(0, 6) + "…" + addr.slice(-4) : "—"; }
+function upperFlightRef(value) { return (value || "").trim().toUpperCase(); }
+function getCoordinatorContract(contract, coordinatorAddress) {
+  if (!contract || !coordinatorAddress || !ethers.isAddress(coordinatorAddress)) return null;
+  return new ethers.Contract(coordinatorAddress, COORDINATOR_ABI, contract.runner);
+}
+function decodeCoordinatorDelay(responseBytes) {
+  if (!responseBytes || responseBytes === "0x") return null;
+  try {
+    const [delay] = ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], responseBytes);
+    return Number(delay);
+  } catch {
+    return null;
+  }
+}
+function decodeCoordinatorError(errorBytes) {
+  if (!errorBytes || errorBytes === "0x") return "";
+  try {
+    return ethers.toUtf8String(errorBytes);
+  } catch {
+    return errorBytes;
+  }
+}
+function extractIsoWallTimeParts(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return null;
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+    hour: Number(match[4]),
+    minute: Number(match[5]),
+    second: Number(match[6] || "0"),
+  };
+}
+function toDatetimeLocalValue(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function apiTimeToDatetimeLocalValue(value) {
+  const parts = extractIsoWallTimeParts(value);
+  if (!parts) return toDatetimeLocalValue(value);
+  const pad = n => String(n).padStart(2, "0");
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+}
+function apiTimeToBrowserDatetimeLocalValue(value, timeZone) {
+  const apiWallTime = apiTimeToDatetimeLocalValue(value);
+  if (!apiWallTime) return "";
+  const ts = zonedWallTimeToTs(apiWallTime, timeZone);
+  return Number.isFinite(ts) ? toDatetimeLocalValue(ts * 1000) : apiWallTime;
+}
+function buildManualFlightInfo(flightRef = "", departureTime = "") {
+  return {
+    flightRef: upperFlightRef(flightRef),
+    airline: "Manual entry",
+    flight_date: departureTime ? String(departureTime).split("T")[0] : "",
+    flight_status: "manual",
+    departure_airport: "Custom input",
+    departure_timezone: BROWSER_TIMEZONE,
+    departure_iata: "",
+    departure_terminal: "",
+    departure_scheduled: departureTime || null,
+    departure_estimated: departureTime || null,
+    departure_actual: null,
+    departure_delay_mins: null,
+    arrival_airport: "",
+    arrival_timezone: "",
+    arrival_iata: "",
+    arrival_terminal: "",
+    arrival_scheduled: null,
+    arrival_estimated: null,
+    arrival_actual: null,
+    arrival_delay_mins: null,
+  };
+}
+function zonedWallTimeToTs(dtStr, timeZone) {
+  if (!timeZone) return localToTs(dtStr);
+  const parts = extractIsoWallTimeParts(dtStr);
+  if (!parts) return localToTs(dtStr);
+  const desiredUtcMs = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const getObservedUtcMs = (ms) => {
+    const entries = Object.fromEntries(
+      formatter
+        .formatToParts(new Date(ms))
+        .filter(part => part.type !== "literal")
+        .map(part => [part.type, part.value])
+    );
+    return Date.UTC(
+      Number(entries.year),
+      Number(entries.month) - 1,
+      Number(entries.day),
+      Number(entries.hour),
+      Number(entries.minute),
+      Number(entries.second)
+    );
+  };
+  const firstPass = desiredUtcMs - (getObservedUtcMs(desiredUtcMs) - desiredUtcMs);
+  const secondPass = firstPass - (getObservedUtcMs(firstPass) - desiredUtcMs);
+  return Math.floor(secondPass / 1000);
+}
+function formatApiTimeWithTimezone(value, timeZone) {
+  const parts = extractIsoWallTimeParts(value);
+  if (!parts) return "—";
+  const pad = n => String(n).padStart(2, "0");
+  const base = `${parts.year}/${pad(parts.month)}/${pad(parts.day)} ${pad(parts.hour)}:${pad(parts.minute)}:${pad(parts.second)}`;
+  return timeZone ? `${base} (${timeZone})` : base;
+}
+function pickDepartureTime(flight) {
+  return flight?.departure_estimated || flight?.departure_scheduled || flight?.departure_actual || "";
+}
+function normalizeFlightStatus(value) {
+  return readTextValue(value, "").trim().toLowerCase();
+}
+function clampExpiryValue(expiryValue, departureValue) {
+  if (!departureValue) return expiryValue;
+  if (!expiryValue) return departureValue;
+  return localToTs(expiryValue) > localToTs(departureValue) ? departureValue : expiryValue;
+}
+function readTextValue(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (typeof value === "object") {
+    if (typeof value.name === "string" && value.name) return value.name;
+    if (typeof value.iata === "string" && value.iata) return value.iata;
+    if (typeof value.icao === "string" && value.icao) return value.icao;
+  }
+  return fallback;
+}
+function normalizeFlightLookupResponse(payload, fallbackFlightRef = "") {
+  const raw = Array.isArray(payload?.data) ? payload.data[0] : payload;
+  if (!raw) return null;
+  const normalized = {
+    flightRef: upperFlightRef(raw.flightRef || raw.flight?.iata || raw.flight?.icao || fallbackFlightRef),
+    airline: readTextValue(raw.airline?.name || raw.airline, "Unknown airline"),
+    flight_date: readTextValue(raw.flight_date, ""),
+    flight_status: readTextValue(raw.flight_status, "unknown"),
+    departure_airport: readTextValue(raw.departure_airport || raw.departure?.airport, ""),
+    departure_timezone: readTextValue(raw.departure_timezone || raw.departure?.timezone, ""),
+    departure_iata: readTextValue(raw.departure_iata || raw.departure?.iata, ""),
+    departure_terminal: readTextValue(raw.departure_terminal || raw.departure?.terminal, ""),
+    departure_scheduled: raw.departure_scheduled || raw.departure?.scheduled || null,
+    departure_estimated: raw.departure_estimated || raw.departure?.estimated || null,
+    departure_actual: raw.departure_actual || raw.departure?.actual || null,
+    departure_delay_mins: raw.departure_delay_mins ?? raw.departure?.delay ?? null,
+    arrival_airport: readTextValue(raw.arrival_airport || raw.arrival?.airport, ""),
+    arrival_timezone: readTextValue(raw.arrival_timezone || raw.arrival?.timezone, ""),
+    arrival_iata: readTextValue(raw.arrival_iata || raw.arrival?.iata, ""),
+    arrival_terminal: readTextValue(raw.arrival_terminal || raw.arrival?.terminal, ""),
+    arrival_scheduled: raw.arrival_scheduled || raw.arrival?.scheduled || null,
+    arrival_estimated: raw.arrival_estimated || raw.arrival?.estimated || null,
+    arrival_actual: raw.arrival_actual || raw.arrival?.actual || null,
+    arrival_delay_mins: raw.arrival_delay_mins ?? raw.arrival?.delay ?? null,
+  };
+  return normalized.flightRef ? normalized : null;
+}
+function readDelayMins(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
+}
+function pickFlightDelayDetails(flightInfo) {
+  const departureDelay = readDelayMins(flightInfo?.departure_delay_mins);
+  if (departureDelay !== null) return { delayMins: departureDelay, source: "departure.delay" };
+  const arrivalDelay = readDelayMins(flightInfo?.arrival_delay_mins);
+  if (arrivalDelay !== null) return { delayMins: arrivalDelay, source: "arrival.delay" };
+  return { delayMins: null, source: "none" };
+}
+async function fetchFlightLookupData(flightRef) {
+  const normalizedFlightRef = upperFlightRef(flightRef);
+  if (!normalizedFlightRef) throw new Error("Flight number is required.");
+  if (!AVIATIONSTACK_API_KEY) throw new Error("Missing REACT_APP_AVIATIONSTACK_API_KEY in frontend/.env.");
+
+  const params = new URLSearchParams({
+    access_key: AVIATIONSTACK_API_KEY,
+    flight_iata: normalizedFlightRef,
+    limit: "1",
+  });
+  const response = await fetch(`${AVIATIONSTACK_BASE_URL}?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`AviationStack request failed with ${response.status}.`);
+  }
+  const payload = await response.json();
+  if (payload?.error?.message || payload?.error?.info) {
+    throw new Error(payload.error.message || payload.error.info);
+  }
+  const normalizedFlight = normalizeFlightLookupResponse(payload, normalizedFlightRef);
+  if (!normalizedFlight) {
+    throw new Error(`No flight data found for ${normalizedFlightRef}.`);
+  }
+  return normalizedFlight;
+}
 function fmtEth(wei) {
   if (wei === undefined || wei === null) return "—";
   const n = parseFloat(ethers.formatEther(wei));
@@ -128,6 +359,14 @@ function nowPlusSeconds(s) {
 }
 function localToTs(dtStr) { return Math.floor(new Date(dtStr).getTime() / 1000); }
 function tsToLocal(ts) { return new Date(Number(ts) * 1000).toLocaleString(); }
+function settlementReadyTs(policy) {
+  if (!policy) return 0;
+  return Number(policy.departureTime) + (Number(policy.delayThreshold) * 60);
+}
+function isSettlementWindowOpen(policy, nowTs = Math.floor(Date.now() / 1000)) {
+  if (!policy) return false;
+  return nowTs >= settlementReadyTs(policy);
+}
 function calcGas(tx, rcpt) {
   const price = tx.gasPrice ?? tx.maxFeePerGas ?? 0n;
   return fmtEth(rcpt.gasUsed * price);
@@ -145,7 +384,16 @@ const inputStyle = { background: "#111318", border: "1px solid #2d3445", borderR
 const btnStyle = (color, extra = {}) => ({ background: color + "22", border: `1px solid ${color}55`, borderRadius: 6, color, padding: "8px 18px", fontSize: 13, fontFamily: "monospace", cursor: "pointer", fontWeight: 600, ...extra });
 const disabledBtnStyle = { background: "#1a1e2a", border: "1px solid #3d4455", borderRadius: 6, color: "#94a3b8", padding: "8px 18px", fontSize: 13, fontFamily: "monospace", cursor: "not-allowed", fontWeight: 600 };
 const CLR = { label: "#cbd5e1", value: "#f1f5f9", dim: "#94a3b8", head: "#f1f5f9" };
-const STATUS_PRIORITY = { ACTIVE: 0, BIDDING_OPEN: 1, BIDDING_ENDED: 2, PAID: 3, EXPIRED: 4, UNKNOWN: 5 };
+const STATUS_PRIORITY = { ACTIVE: 0, UNBID_EXPIRED: 1, BIDDING_OPEN: 2, BIDDING_ENDED: 3, PAID: 4, EXPIRED: 5, UNKNOWN: 6 };
+const RIGHT_PANEL_STATUS_GROUPS = [
+  { key: "ACTIVE", title: "Active" },
+  { key: "UNBID_EXPIRED", title: "Expired" },
+  { key: "BIDDING_OPEN", title: "Bidding Open" },
+  { key: "BIDDING_ENDED", title: "Bidding Ended" },
+  { key: "PAID", title: "Paid" },
+  { key: "EXPIRED", title: "Refunded" },
+  { key: "UNKNOWN", title: "Other" },
+];
 
 function DerivedStatusBadge({ ds }) {
   const m = DERIVED_META[ds] ?? DERIVED_META.UNKNOWN;
@@ -205,6 +453,17 @@ function sortPolicyEntries(entries) {
   });
 }
 
+function groupPolicyEntriesByStatus(entries) {
+  const grouped = new Map(RIGHT_PANEL_STATUS_GROUPS.map(group => [group.key, []]));
+  for (const entry of entries) {
+    const key = grouped.has(entry.ds) ? entry.ds : "UNKNOWN";
+    grouped.get(key).push(entry);
+  }
+  return RIGHT_PANEL_STATUS_GROUPS
+    .map(group => ({ ...group, entries: grouped.get(group.key) ?? [] }))
+    .filter(group => group.entries.length > 0);
+}
+
 function PolicySelectionList({
   policies,
   selectedPolicyId,
@@ -217,7 +476,13 @@ function PolicySelectionList({
   subtitle = "Click any policy below to load it directly.",
 }) {
   const [searchTerm, setSearchTerm] = useState("");
-  const visiblePolicies = policies.filter(({ id }) => String(id).includes(searchTerm.trim()));
+  const normalizedSearchTerm = upperFlightRef(searchTerm);
+  const visiblePolicies = policies.filter(({ id, policy }) => {
+    if (!normalizedSearchTerm) return true;
+    const policyIdMatches = String(id).includes(normalizedSearchTerm);
+    const flightRefMatches = upperFlightRef(fromBytes32(policy.flightRef)).includes(normalizedSearchTerm);
+    return policyIdMatches || flightRefMatches;
+  });
 
   return (
     <div style={{ marginBottom: 16, padding: "14px 16px", background: "#111318", borderRadius: 8, border: "1px solid #2d3445" }}>
@@ -232,8 +497,8 @@ function PolicySelectionList({
       </div>
       <div style={{ marginBottom: 12 }}>
         <input
-          type="number"
-          placeholder="Search Policy ID"
+          type="text"
+          placeholder="Search Policy ID or Flight Number"
           value={searchTerm}
           onChange={e => setSearchTerm(e.target.value)}
           style={inputStyle}
@@ -241,7 +506,7 @@ function PolicySelectionList({
       </div>
       {!visiblePolicies.length ? (
         <div style={{ color: CLR.dim, fontSize: 13, padding: "10px 0" }}>
-          {isLoading ? "Loading policies from chain..." : policies.length ? "No matching policy ID found." : "No policies found yet."}
+          {isLoading ? "Loading policies from chain..." : policies.length ? "No matching policy ID or flight number found." : "No policies found yet."}
         </div>
       ) : (
         <div style={{ display: "grid", gap: 10, maxHeight: "34vh", overflowY: "auto", paddingRight: 4 }}>
@@ -285,16 +550,25 @@ function PolicySelectionList({
 // Sub-Tabs (PassengerTab, UnderwriterTab, ResolverTab - 逻辑保持原样)
 // ─────────────────────────────────────────────────────────────────────────────
 function PassengerTab({ contract, readContract, account, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh }) {
-  const [form, setForm] = useState({ flightRef: "SQ321", departureTime: nowPlusSeconds(3600), delayThreshold: "60", fixedPayout: "0.5", maxPremium: "0.05", auctionEnd: nowPlusSeconds(120), expiry: nowPlusSeconds(86400) });
+  const defaultDepartureTime = apiTimeToBrowserDatetimeLocalValue(pickDepartureTime(DEFAULT_FLIGHT_LOOKUP), DEFAULT_FLIGHT_LOOKUP.departure_timezone) || nowPlusSeconds(3600);
+  const [form, setForm] = useState({ flightRef: DEFAULT_FLIGHT_LOOKUP.flightRef, departureTime: defaultDepartureTime, delayThreshold: "60", fixedPayout: "0.5", maxPremium: "0.05", auctionEnd: nowPlusSeconds(120), expiry: defaultDepartureTime });
   const [log, setLog] = useState({ msg: "", err: "" });
   const [policyId, setPolicyId] = useState(null);
   const [policy, setPolicy] = useState(null);
   const [tForm, setTForm] = useState({ to: "", nftId: "" });
   const [tLog, setTLog] = useState({ msg: "", err: "" });
+  const [flightQuery, setFlightQuery] = useState(DEFAULT_FLIGHT_LOOKUP.flightRef);
+  const [flightInfo, setFlightInfo] = useState(DEFAULT_FLIGHT_LOOKUP);
+  const [isManualFlightEntry, setIsManualFlightEntry] = useState(false);
+  const [flightCache, setFlightCache] = useState({ [DEFAULT_FLIGHT_LOOKUP.flightRef]: DEFAULT_FLIGHT_LOOKUP });
+  const [flightLookupLog, setFlightLookupLog] = useState({ msg: "", err: "" });
+  const [isFlightLookupLoading, setIsFlightLookupLoading] = useState(false);
+  const normalizedFlightStatus = normalizeFlightStatus(flightInfo.flight_status);
+  const canCreatePolicy = isManualFlightEntry || normalizedFlightStatus === "scheduled";
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
   const passengerFields = [
-    { key: "flightRef", label: "Flight Ref", type: "text" },
-    { key: "departureTime", label: "Departure Time", type: "datetime-local" },
+    { key: "flightRef", label: "Flight Ref", type: "text", editable: isManualFlightEntry },
+    { key: "departureTime", label: `Departure Time (${BROWSER_TIMEZONE})`, type: "datetime-local", editable: isManualFlightEntry },
     { key: "delayThreshold", label: "Delay Threshold", type: "text" },
     { key: "fixedPayout", label: "Fixed Payout", type: "text" },
     { key: "maxPremium", label: "Max Premium", type: "text" },
@@ -302,8 +576,78 @@ function PassengerTab({ contract, readContract, account, addTxLog, setCurrentPol
     { key: "expiry", label: "Expiry", type: "datetime-local" },
   ];
 
+  useEffect(() => {
+    if (!isManualFlightEntry) return;
+    setFlightInfo(buildManualFlightInfo(form.flightRef, form.departureTime));
+  }, [isManualFlightEntry, form.flightRef, form.departureTime]);
+
+  function enableManualEntry(prefillFlightRef = "") {
+    setIsManualFlightEntry(true);
+    setForm(f => ({
+      ...f,
+      flightRef: upperFlightRef(prefillFlightRef || f.flightRef),
+      departureTime: f.departureTime || nowPlusSeconds(3600),
+    }));
+  }
+
+  async function lookupFlight() {
+    const normalizedFlightRef = upperFlightRef(flightQuery);
+    if (!normalizedFlightRef) {
+      setFlightLookupLog({ msg: "", err: "Please enter a flight number first." });
+      return;
+    }
+
+    if (flightCache[normalizedFlightRef]) {
+      const cachedFlight = flightCache[normalizedFlightRef];
+      setIsManualFlightEntry(false);
+      setFlightInfo(cachedFlight);
+      setForm(f => {
+        const nextDepartureTime = apiTimeToBrowserDatetimeLocalValue(pickDepartureTime(cachedFlight), cachedFlight.departure_timezone) || f.departureTime;
+        return {
+          ...f,
+          flightRef: cachedFlight.flightRef,
+          departureTime: nextDepartureTime,
+          expiry: clampExpiryValue(f.expiry, nextDepartureTime),
+        };
+      });
+      setFlightLookupLog({ msg: `Loaded ${normalizedFlightRef} from local cache.`, err: "" });
+      return;
+    }
+
+    if (!AVIATIONSTACK_API_KEY) {
+      enableManualEntry(normalizedFlightRef);
+      setFlightLookupLog({ msg: "", err: "Missing REACT_APP_AVIATIONSTACK_API_KEY in frontend/.env. Manual entry is now enabled." });
+      return;
+    }
+
+    setIsFlightLookupLoading(true);
+    setFlightLookupLog({ msg: `Looking up ${normalizedFlightRef}...`, err: "" });
+    try {
+      const normalizedFlight = await fetchFlightLookupData(normalizedFlightRef);
+      setFlightCache(prev => ({ ...prev, [normalizedFlightRef]: normalizedFlight }));
+      setIsManualFlightEntry(false);
+      setFlightInfo(normalizedFlight);
+      setForm(f => {
+        const nextDepartureTime = apiTimeToBrowserDatetimeLocalValue(pickDepartureTime(normalizedFlight), normalizedFlight.departure_timezone) || f.departureTime;
+        return {
+          ...f,
+          flightRef: normalizedFlight.flightRef,
+          departureTime: nextDepartureTime,
+          expiry: clampExpiryValue(f.expiry, nextDepartureTime),
+        };
+      });
+      setFlightLookupLog({ msg: `Loaded ${normalizedFlight.flightRef}. Departure time has been filled into the policy form.`, err: "" });
+    } catch (e) {
+      enableManualEntry(normalizedFlightRef);
+      setFlightLookupLog({ msg: "", err: `${parseError(e)} Manual entry is now enabled.` });
+    } finally {
+      setIsFlightLookupLoading(false);
+    }
+  }
+
   async function createPolicy() {
     if (!contract) { setLog({ err: "Connect wallet first." }); return; }
+    if (!canCreatePolicy) { setLog({ err: `Policy can only be created when flight status is scheduled. Current status: ${flightInfo.flight_status || "unknown"}.` }); return; }
     const now = Math.floor(Date.now() / 1000);
     const departureTs = localToTs(form.departureTime);
     const auctionEndTs = localToTs(form.auctionEnd);
@@ -313,6 +657,7 @@ function PassengerTab({ contract, readContract, account, addTxLog, setCurrentPol
     if (auctionEndTs <= now) { setLog({ err: "Auction End must be in the future." }); return; }
     if (departureTs <= now) { setLog({ err: "Departure Time must be in the future." }); return; }
     if (expiryTs <= auctionEndTs) { setLog({ err: "Expiry must be after Auction End." }); return; }
+    if (expiryTs > departureTs) { setLog({ err: "Expiry cannot be later than Departure Time." }); return; }
     setLog({ msg: "Sending transaction…" });
     try {
       const tx = await contract.createPolicy(toBytes32(form.flightRef), departureTs, Number(form.delayThreshold), ethers.parseEther(form.fixedPayout), auctionEndTs, expiryTs, { value: ethers.parseEther(form.maxPremium) });
@@ -339,11 +684,59 @@ function PassengerTab({ contract, readContract, account, addTxLog, setCurrentPol
 
   return (
     <div>
-      <AccountRoleBanner account={account} mode="passenger" />
-      {passengerFields.map(({ key, label, type }) => (
-        <div key={key} style={{ marginBottom: 10 }}><label style={{ display: "block", color: CLR.label, fontSize: 12 }}>{label}</label><input type={type} value={form[key]} onChange={set(key)} style={inputStyle} /></div>
+      <div style={{ marginBottom: 18, padding: "16px 18px", background: "#09111f", border: "1px solid #4fc3f744", borderRadius: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ color: "#4fc3f7", fontFamily: "monospace", fontSize: 13, fontWeight: 700, textTransform: "uppercase" }}>Flight Lookup</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, width: "min(100%, 360px)", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <input
+              value={flightQuery}
+              onChange={e => setFlightQuery(upperFlightRef(e.target.value))}
+              onKeyDown={e => { if (e.key === "Enter") lookupFlight(); }}
+              placeholder="e.g. SQ322"
+              style={{ ...inputStyle, flex: "1 1 220px" }}
+            />
+            <button onClick={lookupFlight} style={btnStyle("#4fc3f7", { whiteSpace: "nowrap" })} disabled={isFlightLookupLoading}>
+              {isFlightLookupLoading ? "Searching..." : "Lookup"}
+            </button>
+          </div>
+        </div>
+        {isManualFlightEntry && (
+          <div style={{ marginBottom: 12, color: "#fda4af", fontSize: 12, fontFamily: "monospace" }}>
+            Lookup failed, so manual entry is now enabled for Flight Ref and Departure Time.
+          </div>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, fontSize: 12 }}>
+          <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{flightInfo.flightRef}</span></div>
+          <div><span style={{ color: CLR.dim }}>Airline:</span> <span style={{ color: CLR.value }}>{flightInfo.airline}</span></div>
+          <div><span style={{ color: CLR.dim }}>Status:</span> <span style={{ color: CLR.value }}>{flightInfo.flight_status}</span></div>
+          <div><span style={{ color: CLR.dim }}>Flight Date:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{flightInfo.flight_date || "—"}</span></div>
+          <div><span style={{ color: CLR.dim }}>Departure:</span> <span style={{ color: CLR.value }}>{flightInfo.departure_airport} {flightInfo.departure_iata ? `(${flightInfo.departure_iata})` : ""}</span></div>
+          <div><span style={{ color: CLR.dim }}>Arrival:</span> <span style={{ color: CLR.value }}>{flightInfo.arrival_airport} {flightInfo.arrival_iata ? `(${flightInfo.arrival_iata})` : ""}</span></div>
+          <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{flightInfo.departure_scheduled ? formatApiTimeWithTimezone(flightInfo.departure_scheduled, flightInfo.departure_timezone) : "—"}</span></div>
+          <div><span style={{ color: CLR.dim }}>Estimated Departure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{flightInfo.departure_estimated ? formatApiTimeWithTimezone(flightInfo.departure_estimated, flightInfo.departure_timezone) : "—"}</span></div>
+        </div>
+        <Log {...flightLookupLog} />
+      </div>
+      {passengerFields.map(({ key, label, type, editable = true }) => (
+        <div key={key} style={{ marginBottom: 10 }}>
+          <label style={{ display: "block", color: CLR.label, fontSize: 12 }}>{label}</label>
+          <input
+            type={type}
+            value={form[key]}
+            onChange={editable ? set(key) : undefined}
+            readOnly={!editable}
+            disabled={!editable}
+            max={key === "expiry" ? form.departureTime : undefined}
+            style={editable ? inputStyle : { ...inputStyle, color: "#94a3b8", background: "#0b1220", cursor: "not-allowed" }}
+          />
+        </div>
       ))}
-      <button onClick={createPolicy} style={btnStyle("#4fc3f7")}>Create Policy</button><Log {...log} />
+      <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+        <button onClick={createPolicy} disabled={!canCreatePolicy} style={canCreatePolicy ? btnStyle("#4fc3f7") : disabledBtnStyle}>Create Policy</button>
+      </div>
+      <Log {...log} />
       <PolicyCard policy={policy} policyId={policyId ? String(policyId) : "—"} roleAddresses={roleAddresses} />
       {policy?.policyNFTId > 0n && (
         <div style={{ marginTop: 20, padding: "15px", background: "#160d2a", borderRadius: 10 }}><input placeholder="Recipient Address" value={tForm.to} onChange={e => setTForm(f => ({ ...f, to: e.target.value }))} style={inputStyle} /><input placeholder="NFT ID" value={tForm.nftId} onChange={e => setTForm(f => ({ ...f, nftId: e.target.value }))} style={{ ...inputStyle, marginTop: 10 }} /><button onClick={transferNFT} style={{ ...btnStyle("#a78bfa"), marginTop: 10 }}>Transfer NFT</button><Log {...tLog} /></div>
@@ -363,6 +756,13 @@ function UnderwriterTab({ contract, readContract, roleKey, addTxLog, setCurrentP
   const ds = derivedStatus(policy);
   const canBid = ds === "BIDDING_OPEN";
   const canFinalize = ds === "BIDDING_ENDED" && policy?.bestUnderwriter?.toLowerCase() === account?.toLowerCase();
+  const panelShellStyle = {
+    padding: "12px",
+    borderRadius: 12,
+    border: "1px solid #253041",
+    background: "#0b0f17",
+    minWidth: 0,
+  };
 
   async function fetchPolicies() {
     const reader = readContract ?? contract;
@@ -432,29 +832,36 @@ function UnderwriterTab({ contract, readContract, roleKey, addTxLog, setCurrentP
 
   return (
     <div>
-      <AccountRoleBanner account={account} mode="underwriter" />
-      <PolicySelectionList
-        policies={policyList}
-        selectedPolicyId={policyId}
-        onSelect={loadPolicy}
-        roleAddresses={roleAddresses}
-        isLoading={isPolicyListLoading}
-        onRefresh={fetchPolicies}
-        accentColor="#34d399"
-        title="Available Policies"
-        subtitle="Underwriter can click any policy below to load it directly."
-      />
-      <PolicySelectionList
-        policies={finalizeList}
-        selectedPolicyId={policyId}
-        onSelect={loadPolicy}
-        roleAddresses={roleAddresses}
-        isLoading={isPolicyListLoading}
-        onRefresh={fetchPolicies}
-        accentColor="#f59e0b"
-        title="Awaiting Your Finalization"
-        subtitle="These are policies where your bid won and auction has ended."
-      />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 16, alignItems: "start", marginBottom: 16 }}>
+        <div style={panelShellStyle}>
+          <div style={{ color: "#34d399", fontSize: 12, fontFamily: "monospace", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>Bidding Desk</div>
+          <PolicySelectionList
+            policies={policyList}
+            selectedPolicyId={policyId}
+            onSelect={loadPolicy}
+            roleAddresses={roleAddresses}
+            isLoading={isPolicyListLoading}
+            onRefresh={fetchPolicies}
+            accentColor="#34d399"
+            title="Available Policies"
+            subtitle="Policies still open for bidding."
+          />
+        </div>
+        <div style={panelShellStyle}>
+          <div style={{ color: "#f59e0b", fontSize: 12, fontFamily: "monospace", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>Finalization Desk</div>
+          <PolicySelectionList
+            policies={finalizeList}
+            selectedPolicyId={policyId}
+            onSelect={loadPolicy}
+            roleAddresses={roleAddresses}
+            isLoading={isPolicyListLoading}
+            onRefresh={fetchPolicies}
+            accentColor="#f59e0b"
+            title="Awaiting Your Finalization"
+            subtitle="Policies where your winning bid is waiting for collateral lock."
+          />
+        </div>
+      </div>
       <PolicyCard policy={policy} policyId={policyId} roleAddresses={roleAddresses} />
       {policy && (
         <div style={{ marginTop: 15 }}>
@@ -472,12 +879,19 @@ function UnderwriterTab({ contract, readContract, roleKey, addTxLog, setCurrentP
 
 function ResolverTab({ contract, readContract, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh, account }) {
   const [policyId, setPolicyId] = useState("");
-  const [delayMins, setDelayMins] = useState("120");
   const [policy, setPolicy] = useState(null);
   const [policyList, setPolicyList] = useState([]);
   const [isPolicyListLoading, setIsPolicyListLoading] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
+  const [nowTs, setNowTs] = useState(Math.floor(Date.now() / 1000));
   const [log, setLog] = useState({ msg: "", err: "" });
-  const canResolve = derivedStatus(policy) === "ACTIVE";
+  const policyDerivedStatus = derivedStatus(policy);
+  const canResolve = policyDerivedStatus === "ACTIVE" && isSettlementWindowOpen(policy, nowTs);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowTs(Math.floor(Date.now() / 1000)), 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   async function fetchPolicies() {
     const reader = readContract ?? contract;
@@ -495,7 +909,12 @@ function ResolverTab({ contract, readContract, addTxLog, setCurrentPolicy, setCu
           return { id, policy: item };
         })
       );
-      setPolicyList(loaded.filter(({ policy }) => policy.passenger !== ethers.ZeroAddress));
+      setPolicyList(
+        loaded.filter(({ policy }) =>
+          policy.passenger !== ethers.ZeroAddress &&
+          derivedStatus(policy) === "ACTIVE"
+        )
+      );
     } catch (e) {
       setLog({ err: parseError(e) });
     } finally {
@@ -518,19 +937,50 @@ function ResolverTab({ contract, readContract, addTxLog, setCurrentPolicy, setCu
     } catch (e) { setLog({ err: parseError(e) }); }
   }
   async function resolve() {
+    if (!contract || !policy) {
+      setLog({ msg: "", err: "Load an active policy first." });
+      return;
+    }
+    if (policyDerivedStatus !== "ACTIVE") {
+      setLog({ msg: "", err: "Only active policies can be resolved." });
+      return;
+    }
+    const resolveAfterTs = settlementReadyTs(policy);
+    if (nowTs < resolveAfterTs) {
+      setLog({ msg: "", err: `Resolve is locked until ${tsToLocal(resolveAfterTs)}.` });
+      return;
+    }
+    const flightRef = upperFlightRef(fromBytes32(policy.flightRef));
+    if (!flightRef) {
+      setLog({ msg: "", err: "This policy has no valid flight number." });
+      return;
+    }
+    setIsResolving(true);
+    setLog({ msg: "Fetching delay data from AviationStack...", err: "" });
     try {
-      const tx = await contract.resolvePolicy(policyId, Number(delayMins));
+      const flightInfo = await fetchFlightLookupData(flightRef);
+      const delayDetails = pickFlightDelayDetails(flightInfo);
+      if (delayDetails.delayMins === null) {
+        throw new Error(`AviationStack did not return a usable delay field for ${flightRef} yet.`);
+      }
+      const tx = await contract.resolvePolicy(policyId, delayDetails.delayMins);
       await tx.wait();
-      addTxLog(buildTxLog("resolver", `Resolved Policy #${policyId} with reported delay ${delayMins} minutes`));
-      setLog({ msg: "Resolved!" }); loadPolicy(); fetchPolicies(); triggerBalanceRefresh();
-    } catch (e) { setLog({ err: parseError(e) }); }
+      addTxLog(buildTxLog("resolver", `Resolved Policy #${policyId} from AviationStack ${delayDetails.source} = ${delayDetails.delayMins} min`));
+      setLog({ msg: `Resolved from AviationStack. ${delayDetails.source} reported ${delayDetails.delayMins} minutes of delay.`, err: "" });
+      loadPolicy(); fetchPolicies(); triggerBalanceRefresh();
+    } catch (e) { setLog({ msg: "", err: parseError(e) }); }
+    finally { setIsResolving(false); }
   }
 
-  const resolverAccount = roleAddresses.resolver?.toLowerCase() === account?.toLowerCase();
+  const resolveAfterTs = policy ? settlementReadyTs(policy) : 0;
+  const resolveWindowMessage = policy
+    ? canResolve
+      ? "Resolve is unlocked. Clicking the button will fetch the delay field from AviationStack."
+      : `Resolve unlocks at ${tsToLocal(resolveAfterTs)}.`
+    : "";
 
   return (
     <div>
-      <AccountRoleBanner account={account} mode="resolver" resolverAccount={resolverAccount} />
       <PolicySelectionList
         policies={policyList}
         selectedPolicyId={policyId}
@@ -539,15 +989,20 @@ function ResolverTab({ contract, readContract, addTxLog, setCurrentPolicy, setCu
         isLoading={isPolicyListLoading}
         onRefresh={fetchPolicies}
         accentColor="#f59e0b"
-        title="Policies Awaiting Review"
-        subtitle="Resolver can browse all policies and open one directly for settlement."
+        title="Policies Awaiting API Settlement"
+        subtitle="Resolver cannot enter delay minutes manually. Resolve uses AviationStack delay data."
       />
-      <div style={{ display: "flex", gap: 8, marginBottom: 15 }}><input type="number" placeholder="Policy ID" value={policyId} onChange={e => setPolicyId(e.target.value)} style={inputStyle} /><button onClick={loadPolicy} style={btnStyle("#94a3b8")}>Load</button></div>
       <PolicyCard policy={policy} policyId={policyId} roleAddresses={roleAddresses} />
       {policy && (
         <div style={{ marginTop: 15 }}>
-          <input type="number" value={delayMins} onChange={e => setDelayMins(e.target.value)} style={inputStyle} />
-          <button onClick={resolve} disabled={!canResolve} style={canResolve ? btnStyle("#f59e0b") : disabledBtnStyle} >Resolve</button>
+          <div style={{ marginBottom: 10, color: canResolve ? "#fcd34d" : "#94a3b8", fontSize: 12, fontFamily: "monospace" }}>
+            {resolveWindowMessage}
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+            <button onClick={resolve} disabled={!canResolve || isResolving} style={canResolve && !isResolving ? btnStyle("#f59e0b") : disabledBtnStyle}>
+              {isResolving ? "Resolving..." : "Resolve From API"}
+            </button>
+          </div>
           <Log {...log} />
         </div>
       )}
@@ -555,11 +1010,19 @@ function ResolverTab({ contract, readContract, addTxLog, setCurrentPolicy, setCu
   );
 }
 
-function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, txLog, account, refreshTick, activeMode }) {
+function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, txLog, account, refreshTick, activeMode, addTxLog, triggerBalanceRefresh }) {
   const [relatedPolicies, setRelatedPolicies] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [panelError, setPanelError] = useState("");
   const [expandedPolicyId, setExpandedPolicyId] = useState(null);
+  const [refundingPolicyId, setRefundingPolicyId] = useState(null);
+  const [settlingPolicyId, setSettlingPolicyId] = useState(null);
+  const [panelActionState, setPanelActionState] = useState({ policyId: null, msg: "", err: "" });
+  const [coordinatorStatus, setCoordinatorStatus] = useState({
+    pendingRequestId: ethers.ZeroHash,
+    pendingPolicyId: null,
+  });
+  const [policySettlementStates, setPolicySettlementStates] = useState({});
 
   useEffect(() => {
     async function fetchRelevantPolicies() {
@@ -595,7 +1058,11 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
               .filter(({ policy }) => policy.passenger !== ethers.ZeroAddress)
               .map(entry => ({
                 ...entry,
-                relation: entry.ds === "ACTIVE" ? "Ready to resolve" : "Waiting for finalization or already settled",
+                relation: entry.ds === "ACTIVE"
+                  ? isSettlementWindowOpen(entry.policy)
+                    ? "Ready to resolve from API"
+                    : `Resolve unlocks at ${tsToLocal(settlementReadyTs(entry.policy))}`
+                  : "Waiting for finalization or already settled",
               }));
           }
         } else if (activeMode === "underwriter") {
@@ -657,12 +1124,186 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
     fetchRelevantPolicies();
   }, [contract, readContract, account, activeMode, refreshTick]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let timerId = null;
+
+    async function fetchCoordinatorStatus() {
+      if (ACTIVE_NETWORK_KEY !== "sepolia") {
+        if (!cancelled) {
+          setCoordinatorStatus({
+            pendingRequestId: ethers.ZeroHash,
+            pendingPolicyId: null,
+          });
+        }
+        return;
+      }
+
+      const reader = getCoordinatorContract(readContract ?? contract, roleAddresses.resolver);
+      if (!reader) return;
+
+      try {
+        const [pendingRequestId, pendingPolicyId] = await Promise.all([
+          reader.pendingRequestId(),
+          reader.pendingPolicyId(),
+        ]);
+
+        if (!cancelled) {
+          setCoordinatorStatus({
+            pendingRequestId,
+            pendingPolicyId: Number(pendingPolicyId),
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setCoordinatorStatus({
+            pendingRequestId: ethers.ZeroHash,
+            pendingPolicyId: null,
+          });
+        }
+      }
+    }
+
+    fetchCoordinatorStatus();
+    timerId = window.setInterval(fetchCoordinatorStatus, 8000);
+
+    return () => {
+      cancelled = true;
+      if (timerId) window.clearInterval(timerId);
+    };
+  }, [contract, readContract, roleAddresses.resolver, refreshTick]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timerId = null;
+
+    async function fetchPolicySettlementStates() {
+      if (ACTIVE_NETWORK_KEY !== "sepolia") {
+        if (!cancelled) setPolicySettlementStates({});
+        return;
+      }
+
+      const reader = getCoordinatorContract(readContract ?? contract, roleAddresses.resolver);
+      if (!reader || !relatedPolicies.length) {
+        if (!cancelled) setPolicySettlementStates({});
+        return;
+      }
+
+      const activePolicyIds = relatedPolicies
+        .filter(({ ds }) => ds === "ACTIVE")
+        .map(({ id }) => Number(id));
+
+      if (!activePolicyIds.length) {
+        if (!cancelled) setPolicySettlementStates({});
+        return;
+      }
+
+      try {
+        const entries = await Promise.all(
+          activePolicyIds.map(async (id) => {
+            const [pendingRequestId, lastRequestId, lastResponse, lastError] = await reader.getPolicySettlementState(id);
+            return [String(id), { pendingRequestId, lastRequestId, lastResponse, lastError }];
+          })
+        );
+
+        if (!cancelled) {
+          setPolicySettlementStates(Object.fromEntries(entries));
+        }
+      } catch {
+        if (!cancelled) setPolicySettlementStates({});
+      }
+    }
+
+    fetchPolicySettlementStates();
+    timerId = window.setInterval(fetchPolicySettlementStates, 8000);
+
+    return () => {
+      cancelled = true;
+      if (timerId) window.clearInterval(timerId);
+    };
+  }, [contract, readContract, roleAddresses.resolver, relatedPolicies, refreshTick]);
+
+  async function refundExpiredPolicy(targetPolicyId) {
+    if (!contract) {
+      setPanelActionState({ policyId: targetPolicyId, msg: "", err: "Connect wallet first." });
+      return;
+    }
+    setRefundingPolicyId(targetPolicyId);
+    setPanelActionState({ policyId: targetPolicyId, msg: "", err: "" });
+    try {
+      const tx = await contract.expireUnbidPolicy(targetPolicyId);
+      await tx.wait();
+      addTxLog?.(buildTxLog("passenger", `Refunded expired unbid Policy #${targetPolicyId}`));
+      setPanelActionState({ policyId: targetPolicyId, msg: "Refunded successfully!", err: "" });
+      triggerBalanceRefresh?.();
+    } catch (e) {
+      setPanelActionState({ policyId: targetPolicyId, msg: "", err: parseError(e) });
+    } finally {
+      setRefundingPolicyId(null);
+    }
+  }
+
+  async function requestChainlinkSettlement(targetPolicyId, policy) {
+    if (!contract) {
+      setPanelActionState({ policyId: targetPolicyId, msg: "", err: "Connect wallet first." });
+      return;
+    }
+    if (ACTIVE_NETWORK_KEY !== "sepolia") {
+      setPanelActionState({ policyId: targetPolicyId, msg: "", err: "Chainlink-triggered settlement is only enabled on Sepolia." });
+      return;
+    }
+
+    const normalizedAccount = account?.toLowerCase();
+    const isAuthorizedParticipant = normalizedAccount && (
+      policy.passenger?.toLowerCase() === normalizedAccount ||
+      policy.bestUnderwriter?.toLowerCase() === normalizedAccount
+    );
+
+    if (!isAuthorizedParticipant) {
+      setPanelActionState({ policyId: targetPolicyId, msg: "", err: "Only the passenger or winning underwriter can request settlement." });
+      return;
+    }
+
+    if (derivedStatus(policy) !== "ACTIVE") {
+      setPanelActionState({ policyId: targetPolicyId, msg: "", err: "Only active policies can request settlement." });
+      return;
+    }
+
+    const resolveAfterTs = settlementReadyTs(policy);
+    const nowTs = Math.floor(Date.now() / 1000);
+    if (nowTs < resolveAfterTs) {
+      setPanelActionState({ policyId: targetPolicyId, msg: "", err: `Settlement unlocks at ${tsToLocal(resolveAfterTs)}.` });
+      return;
+    }
+
+    const coordinator = getCoordinatorContract(contract, roleAddresses.resolver);
+    if (!coordinator) {
+      setPanelActionState({ policyId: targetPolicyId, msg: "", err: "Settlement coordinator is not configured." });
+      return;
+    }
+
+    setSettlingPolicyId(targetPolicyId);
+    setPanelActionState({ policyId: targetPolicyId, msg: "", err: "" });
+    try {
+      const tx = await coordinator.requestPolicySettlement(targetPolicyId);
+      await tx.wait();
+      addTxLog?.(buildTxLog(activeMode === "underwriter" ? "underwriter" : "passenger", `Requested Chainlink settlement for Policy #${targetPolicyId}`));
+      setPanelActionState({ policyId: targetPolicyId, msg: "Chainlink settlement request submitted. Wait for the DON callback to settle the policy.", err: "" });
+      triggerBalanceRefresh?.();
+    } catch (e) {
+      setPanelActionState({ policyId: targetPolicyId, msg: "", err: parseError(e) });
+    } finally {
+      setSettlingPolicyId(null);
+    }
+  }
+
   const panelMeta = {
     passenger: { title: "YOUR POLICIES", accent: "#4fc3f7", empty: "You haven't created any policies yet." },
     underwriter: { title: "YOUR BIDDED POLICIES", accent: "#34d399", empty: "You haven't placed any bids yet." },
     resolver: { title: "RESOLUTION QUEUE", accent: "#f59e0b", empty: "No policies are available to review right now." },
     default: { title: "RELATED POLICIES", accent: "#94a3b8", empty: "No related policies found." },
   }[activeMode] ?? { title: "RELATED POLICIES", accent: "#94a3b8", empty: "No related policies found." };
+  const groupedPolicies = groupPolicyEntriesByStatus(relatedPolicies);
 
   return (
     <div style={{ flex: 2, background: "#0d0f14", borderLeft: "1px solid #1e2330", overflowY: "auto", padding: "16px", minWidth: 0, minHeight: 0 }}>
@@ -673,43 +1314,147 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
       ) : !relatedPolicies.length ? (
         <div style={{ color: CLR.dim, fontSize: 13, marginBottom: 16 }}>{panelMeta.empty}</div>
       ) : (
-        <div style={{ display: "grid", gap: 10 }}>
-          {relatedPolicies.map(({ id, policy, ds, relation }) => {
-            const isActiveSelection = String(currentPolicyId) === String(id);
-            const isExpanded = String(expandedPolicyId) === String(id);
-            const bestPremium = (!policy.maxPremium || policy.bestPremium === policy.maxPremium) ? "(no bids yet)" : fmtEth(policy.bestPremium);
-            const shouldShowRelation = relation && relation !== "Created by you";
-            return (
-              <button
-                key={id}
-                onClick={() => setExpandedPolicyId(prev => String(prev) === String(id) ? null : id)}
-                style={{ padding: "12px", background: "#111318", borderRadius: 8, border: `1px solid ${isActiveSelection || isExpanded ? panelMeta.accent + "88" : "#2d3445"}`, width: "100%", textAlign: "left", cursor: "pointer" }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <span style={{ color: "#fff", fontFamily: "monospace", fontSize: 13, fontWeight: 700 }}>Policy #{id}</span>
-                  <DerivedStatusBadge ds={ds} />
+        <div style={{ display: "grid", gap: 14 }}>
+          {groupedPolicies.map(group => (
+            <section key={group.key}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <div style={{ color: panelMeta.accent, fontSize: 12, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", whiteSpace: "nowrap" }}>
+                  {group.title}
                 </div>
-                {shouldShowRelation && <div style={{ color: panelMeta.accent, fontSize: 12, marginBottom: 8 }}>{relation}</div>}
-                <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
-                  <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(policy.flightRef)}</span></div>
-                  <div><span style={{ color: CLR.dim }}>Passenger:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{shortAddr(policy.passenger)}</span></div>
-                  <div><span style={{ color: CLR.dim }}>Best Premium:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{bestPremium}</span></div>
-                  <div><span style={{ color: CLR.dim }}>Best UW:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{addrDisplay(policy.bestUnderwriter, roleAddresses)}</span></div>
+                <div style={{ flex: 1, height: 1, background: "#253041" }} />
+                <div style={{ color: CLR.dim, fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap" }}>
+                  {group.entries.length} {group.entries.length === 1 ? "policy" : "policies"}
                 </div>
-                {isExpanded && (
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #253041", display: "grid", gap: 4, fontSize: 12 }}>
-                    <div><span style={{ color: CLR.dim }}>Fixed Payout:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(policy.fixedPayout)}</span></div>
-                    <div><span style={{ color: CLR.dim }}>Delay Threshold:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{String(policy.delayThreshold)} min</span></div>
-                    <div><span style={{ color: CLR.dim }}>Auction Ends:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.auctionEnd)}</span></div>
-                    <div><span style={{ color: CLR.dim }}>Expiry:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.expiry)}</span></div>
-                    <div><span style={{ color: CLR.dim }}>Max Premium:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(policy.maxPremium)}</span></div>
-                    <div><span style={{ color: CLR.dim }}>Policy NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{policy.policyNFTId > 0n ? `#${policy.policyNFTId}` : "(not minted)"}</span></div>
-                    <div><span style={{ color: CLR.dim }}>Risk NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{policy.riskNFTId > 0n ? `#${policy.riskNFTId}` : "(not minted)"}</span></div>
-                  </div>
-                )}
-              </button>
-            );
-          })}
+              </div>
+              <div style={{ display: "grid", gap: 10 }}>
+                {group.entries.map(({ id, policy, ds, relation }) => {
+                  const isActiveSelection = String(currentPolicyId) === String(id);
+                  const isExpanded = String(expandedPolicyId) === String(id);
+                  const bestPremium = (!policy.maxPremium || policy.bestPremium === policy.maxPremium) ? "(no bids yet)" : fmtEth(policy.bestPremium);
+                  const shouldShowRelation = relation && relation !== "Created by you";
+                  const canRefundFromRightPanel = activeMode === "passenger" && ds === "UNBID_EXPIRED" && policy.passenger?.toLowerCase() === account?.toLowerCase();
+                  const canRequestSettlementFromRightPanel =
+                    ACTIVE_NETWORK_KEY === "sepolia" &&
+                    (activeMode === "passenger" || activeMode === "underwriter") &&
+                    ds === "ACTIVE" &&
+                    (
+                      policy.passenger?.toLowerCase() === account?.toLowerCase() ||
+                      policy.bestUnderwriter?.toLowerCase() === account?.toLowerCase()
+                    );
+                  const settlementUnlockTs = settlementReadyTs(policy);
+                  const isPendingForThisPolicy =
+                    coordinatorStatus.pendingRequestId !== ethers.ZeroHash &&
+                    coordinatorStatus.pendingPolicyId === Number(id);
+                  const anotherPolicyIsPending =
+                    coordinatorStatus.pendingRequestId !== ethers.ZeroHash &&
+                    coordinatorStatus.pendingPolicyId !== null &&
+                    coordinatorStatus.pendingPolicyId !== Number(id);
+                  const isSettlementUnlocked = canRequestSettlementFromRightPanel && isSettlementWindowOpen(policy) && !anotherPolicyIsPending && !isPendingForThisPolicy;
+                  const shouldShowSettlementBlock =
+                    ACTIVE_NETWORK_KEY === "sepolia" &&
+                    (activeMode === "passenger" || activeMode === "underwriter") &&
+                    ds === "ACTIVE";
+                  const policySettlementState = policySettlementStates[String(id)] || {
+                    pendingRequestId: ethers.ZeroHash,
+                    lastRequestId: ethers.ZeroHash,
+                    lastResponse: "0x",
+                    lastError: "0x",
+                  };
+                  const decodedLastDelay = decodeCoordinatorDelay(policySettlementState.lastResponse);
+                  const decodedLastError = decodeCoordinatorError(policySettlementState.lastError);
+                  const isRefunding = refundingPolicyId === id;
+                  const isSettling = settlingPolicyId === id;
+                  const actionMessage = panelActionState.policyId === id ? panelActionState.msg : "";
+                  const actionError = panelActionState.policyId === id ? panelActionState.err : "";
+                  return (
+                    <div
+                      key={id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setExpandedPolicyId(prev => String(prev) === String(id) ? null : id)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setExpandedPolicyId(prev => String(prev) === String(id) ? null : id);
+                        }
+                      }}
+                      style={{ padding: "12px", background: "#0d0f14", borderRadius: 8, border: `1px solid ${isActiveSelection || isExpanded ? panelMeta.accent + "88" : "#2d3445"}`, width: "100%", textAlign: "left", cursor: "pointer" }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                        <span style={{ color: "#fff", fontFamily: "monospace", fontSize: 13, fontWeight: 700 }}>Policy #{id}</span>
+                        <DerivedStatusBadge ds={ds} />
+                      </div>
+                      {shouldShowRelation && <div style={{ color: panelMeta.accent, fontSize: 12, marginBottom: 8 }}>{relation}</div>}
+                      <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                        <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(policy.flightRef)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Passenger:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{shortAddr(policy.passenger)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Best Premium:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{bestPremium}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Best UW:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{addrDisplay(policy.bestUnderwriter, roleAddresses)}</span></div>
+                      </div>
+                      {isExpanded && (
+                        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #253041", display: "grid", gap: 4, fontSize: 12 }}>
+                          <div><span style={{ color: CLR.dim }}>Fixed Payout:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(policy.fixedPayout)}</span></div>
+                          <div><span style={{ color: CLR.dim }}>Delay Threshold:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{String(policy.delayThreshold)} min</span></div>
+                          <div><span style={{ color: CLR.dim }}>Auction Ends:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.auctionEnd)}</span></div>
+                          <div><span style={{ color: CLR.dim }}>Expiry:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.expiry)}</span></div>
+                          <div><span style={{ color: CLR.dim }}>Max Premium:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(policy.maxPremium)}</span></div>
+                          <div><span style={{ color: CLR.dim }}>Policy NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{policy.policyNFTId > 0n ? `#${policy.policyNFTId}` : "(not minted)"}</span></div>
+                          <div><span style={{ color: CLR.dim }}>Risk NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{policy.riskNFTId > 0n ? `#${policy.riskNFTId}` : "(not minted)"}</span></div>
+                          {shouldShowSettlementBlock && (
+                            <div style={{ marginTop: 8 }}>
+                              <div style={{ color: isSettlementUnlocked ? "#fcd34d" : "#94a3b8", fontSize: 12, marginBottom: 8, fontFamily: "monospace" }}>
+                                {canRequestSettlementFromRightPanel
+                                  ? isPendingForThisPolicy
+                                    ? "Chainlink request is pending. Refreshing the page will keep showing this pending state."
+                                    : anotherPolicyIsPending
+                                      ? `Coordinator is currently processing Policy #${coordinatorStatus.pendingPolicyId}.`
+                                      : isSettlementUnlocked
+                                        ? "Ready to request Chainlink settlement."
+                                        : `Settlement unlocks at ${tsToLocal(settlementUnlockTs)}.`
+                                  : "Only the passenger or winning underwriter can request Chainlink settlement."}
+                              </div>
+                              <div style={{ display: "grid", gap: 4, marginBottom: 8, fontSize: 12 }}>
+                                <div><span style={{ color: CLR.dim }}>Pending Request:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{policySettlementState.pendingRequestId !== ethers.ZeroHash ? shortAddr(policySettlementState.pendingRequestId) : "—"}</span></div>
+                                <div><span style={{ color: CLR.dim }}>Last Request:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{policySettlementState.lastRequestId !== ethers.ZeroHash ? shortAddr(policySettlementState.lastRequestId) : "—"}</span></div>
+                                <div><span style={{ color: CLR.dim }}>Last Delay:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{decodedLastDelay === null ? "—" : `${decodedLastDelay} min`}</span></div>
+                                <div><span style={{ color: CLR.dim }}>Last Error:</span> <span style={{ color: decodedLastError ? "#fca5a5" : CLR.value, fontFamily: "monospace", wordBreak: "break-word" }}>{decodedLastError || "—"}</span></div>
+                              </div>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  requestChainlinkSettlement(id, policy);
+                                }}
+                                disabled={!isSettlementUnlocked || isSettling || isPendingForThisPolicy}
+                                style={isSettlementUnlocked && !isSettling ? btnStyle("#f59e0b") : disabledBtnStyle}
+                              >
+                                {isSettling || isPendingForThisPolicy ? "Requesting..." : "Request Chainlink Settlement"}
+                              </button>
+                              {(actionMessage || actionError) && <Log msg={actionMessage} err={actionError} />}
+                            </div>
+                          )}
+                          {canRefundFromRightPanel && (
+                            <div style={{ marginTop: 8 }}>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  refundExpiredPolicy(id);
+                                }}
+                                disabled={isRefunding}
+                                style={isRefunding ? disabledBtnStyle : btnStyle("#fb7185")}
+                              >
+                                {isRefunding ? "Refunding..." : "Refund"}
+                              </button>
+                            </div>
+                          )}
+                          {(actionMessage || actionError) && !(shouldShowSettlementBlock || canRefundFromRightPanel) && <Log msg={actionMessage} err={actionError} />}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
         </div>
       )}
       <h3 style={{ fontSize: 13, color: "#fff", marginTop: 25, marginBottom: 15 }}>ACTIVITY LOG</h3>
@@ -752,9 +1497,21 @@ export default function App() {
       }
       setAccount(accounts[0]);
       const prov = new ethers.BrowserProvider(window.ethereum);
+      const net = await prov.getNetwork();
+      if (Number(net.chainId) !== EXPECTED_CHAIN_ID) {
+        setContract(null);
+        setConnLog(`Wrong network in MetaMask. Switch to ${ACTIVE_NETWORK_LABEL} (chainId ${EXPECTED_CHAIN_ID}).`);
+        return;
+      }
+      if (!hasConfiguredAddress) {
+        setContract(null);
+        setConnLog(`Missing contract address for ${ACTIVE_NETWORK_LABEL}. Set it in frontend/.env and restart npm start.`);
+        return;
+      }
       const signer = await prov.getSigner();
       const nextContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
       setContract(nextContract);
+      setConnLog("");
       try {
         const resolver = await (readOnlyContract ?? nextContract).resolver();
         setRoleAddresses(prev => ({ ...prev, resolver }));
@@ -770,14 +1527,24 @@ export default function App() {
     try {
       const prov = new ethers.BrowserProvider(window.ethereum);
       const accounts = await prov.send("eth_requestAccounts", []);
-      const signer = await prov.getSigner();
       const net = await prov.getNetwork();
+      if (Number(net.chainId) !== EXPECTED_CHAIN_ID) {
+        setContract(null);
+        setConnLog(`Wrong network in MetaMask. Switch to ${ACTIVE_NETWORK_LABEL} (chainId ${EXPECTED_CHAIN_ID}).`);
+        return;
+      }
+      if (!hasConfiguredAddress) {
+        setContract(null);
+        setConnLog(`Missing contract address for ${ACTIVE_NETWORK_LABEL}. Set it in frontend/.env and restart npm start.`);
+        return;
+      }
+      const signer = await prov.getSigner();
       const code = readProvider ? await readProvider.getCode(CONTRACT_ADDRESS) : await prov.getCode(CONTRACT_ADDRESS);
       setAccount(accounts[0]);
       setNetwork(`${net.name} (${net.chainId})`);
       if (code === "0x") {
         setContract(null);
-        setConnLog(`No contract code found at ${CONTRACT_ADDRESS}. Redeploy SkyHedgeCore and update frontend/src/config.js.`);
+        setConnLog(`No contract code found at ${CONTRACT_ADDRESS} on ${ACTIVE_NETWORK_LABEL}. Check your .env settings and redeploy if needed.`);
         return;
       }
       setConnLog("");
@@ -838,7 +1605,7 @@ export default function App() {
             </>
           )}
         </div>
-        <RightPanel contract={contract} readContract={readOnlyContract} account={account} roleAddresses={roleAddresses} currentPolicyId={currentPolicyId} txLog={txLog} refreshTick={refreshTick} activeMode={activeMode} />
+        <RightPanel contract={contract} readContract={readOnlyContract} account={account} roleAddresses={roleAddresses} currentPolicyId={currentPolicyId} txLog={txLog} refreshTick={refreshTick} activeMode={activeMode} addTxLog={addTxLog} triggerBalanceRefresh={triggerBalanceRefresh} />
       </div>
     </div>
   );
