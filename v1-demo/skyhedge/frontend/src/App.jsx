@@ -1,29 +1,45 @@
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
-import { ACTIVE_NETWORK_KEY, ACTIVE_NETWORK_LABEL, CONTRACT_ADDRESS, ABI, COORDINATOR_ABI, STATUS, READ_RPC_URL, DEPLOY_BLOCK, EXPECTED_CHAIN_ID, AVIATIONSTACK_API_KEY, AVIATIONSTACK_BASE_URL } from "./config";
+import { ACTIVE_NETWORK_KEY, ACTIVE_NETWORK_LABEL, CONTRACT_ADDRESS, ABI, COORDINATOR_ABI, STATUS, READ_RPC_URL, DEPLOY_BLOCK, EXPECTED_CHAIN_ID, CIRIUM_API_TOKEN, CIRIUM_BASE_URL, SYNDICATE_MANAGER_ADDRESS, SYNDICATE_MANAGER_ABI, RISK_VAULT_ABI } from "./config";
 
 const hasConfiguredAddress = Boolean(CONTRACT_ADDRESS) && ethers.isAddress(CONTRACT_ADDRESS);
 const readProvider = READ_RPC_URL ? new ethers.JsonRpcProvider(READ_RPC_URL) : null;
 const readOnlyContract = readProvider && hasConfiguredAddress ? new ethers.Contract(CONTRACT_ADDRESS, ABI, readProvider) : null;
 const BROWSER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "Local";
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+function dateInputDaysFromNow(offsetDays = 0) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function shiftDateInputValue(dateInputValue, offsetDays) {
+  const d = new Date(`${dateInputValue}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return dateInputValue;
+  d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+const MIN_LOOKUP_DATE = dateInputDaysFromNow(0);
 const DEFAULT_FLIGHT_LOOKUP = {
-  flightRef: "SQ322",
-  airline: "Singapore Airlines",
-  flight_date: "2026-04-05",
+  flightRef: "TR134",
+  airline: "Scoot",
+  flight_date: "2026-04-07",
   flight_status: "scheduled",
   departure_airport: "Singapore Changi",
   departure_timezone: "Asia/Singapore",
   departure_iata: "SIN",
-  departure_terminal: "3",
-  departure_scheduled: "2026-04-05T23:00:00+00:00",
-  departure_estimated: "2026-04-05T23:00:00+00:00",
+  departure_terminal: "1",
+  departure_scheduled: "2026-04-07T19:05:00.000",
+  departure_estimated: "2026-04-07T19:05:00.000",
   departure_actual: null,
   departure_delay_mins: null,
-  arrival_airport: "Heathrow",
-  arrival_timezone: "Europe/London",
-  arrival_iata: "LHR",
-  arrival_terminal: "2",
-  arrival_scheduled: "2026-04-06T05:55:00+00:00",
+  arrival_airport: "Xi'an Xianyang International Airport",
+  arrival_timezone: "Asia/Shanghai",
+  arrival_iata: "XIY",
+  arrival_terminal: "",
+  arrival_scheduled: "2026-04-08T00:40:00.000",
   arrival_estimated: null,
   arrival_actual: null,
   arrival_delay_mins: null,
@@ -58,6 +74,24 @@ function UnderwriterView({ sharedProps, roleKey }) {
   );
 }
 
+function SyndicateView({ sharedProps }) {
+  return (
+    <div style={{ height: "100%", padding: "22px", background: "radial-gradient(circle at top left, #3b1f11 0%, #16181d 42%, #0b0f17 100%)", border: "1px solid #fb923c44", borderRadius: "24px", boxShadow: "0 18px 50px #00000033", display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+      <div style={{ marginBottom: 18 }}>
+        <div>
+          <h2 style={{ color: "#fb923c", fontSize: "30px", marginBottom: 8 }}>🧩 Risk NFT Marketplace</h2>
+          <div style={{ color: "#fed7aa", fontSize: 13, maxWidth: 760, lineHeight: 1.6 }}>
+            List one Risk NFT for shared exposure, let other users subscribe to fixed shares, and manage the post-settlement claim flow from one focused workspace.
+          </div>
+        </div>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 6 }}>
+        <SyndicateTab {...sharedProps} />
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 🔮 预言机专属 Dashboard：金色权威感
 // ─────────────────────────────────────────────────────────────────────────────
@@ -87,6 +121,7 @@ const HARDHAT_DEFAULTS = {
 const ROLE_META = {
   passenger:    { label: "✈️ Passenger",     color: "#4fc3f7" },
   underwriter:  { label: "🏦 Underwriter",   color: "#34d399" },
+  syndicate:    { label: "🧩 Risk NFT Marketplace", color: "#fb923c" },
   underwriter1: { label: "🏦 Underwriter 1", color: "#34d399" },
   underwriter2: { label: "🏦 Underwriter 2", color: "#a78bfa" },
   resolver:     { label: "🔮 Resolver",       color: "#f59e0b" },
@@ -116,16 +151,17 @@ function derivedStatus(policy) {
   }
   if (s === 1) return "ACTIVE";
   if (s === 2) return "PAID";
-  if (s === 3) return "EXPIRED";
+  if (s === 3) return policy.policyNFTId > 0n ? "RESOLVED_ON_TIME" : "REFUNDED_UNBID";
   return "UNKNOWN";
 }
 const DERIVED_META = {
   BIDDING_OPEN:  { label: "BIDDING — OPEN",  color: "#f59e0b", desc: "Auction open. Underwriters can place bids now." },
   BIDDING_ENDED: { label: "BIDDING — ENDED", color: "#ef4444", desc: "Auction closed. Winning underwriter must finalize." },
-  UNBID_EXPIRED: { label: "EXPIRED",         color: "#fb7185", desc: "No bids were placed. Passenger refund is still pending." },
+  UNBID_EXPIRED: { label: "Waiting Refund",  color: "#fb7185", desc: "No bids were placed. Passenger refund is still pending." },
   ACTIVE:        { label: "ACTIVE",           color: "#3b82f6", desc: "Collateral locked. Awaiting oracle resolution." },
-  PAID:          { label: "PAID",             color: "#22c55e", desc: "Flight delayed. Payout sent to Policy NFT holder." },
-  EXPIRED:       { label: "REFUNDED",         color: "#6b7280", desc: "Funds have already been returned to the rightful holder." },
+  PAID:          { label: "Payout Paid",      color: "#22c55e", desc: "Flight delayed. Payout sent to Policy NFT holder." },
+  REFUNDED_UNBID:{ label: "Refunded",         color: "#94a3b8", desc: "Unbid policy expired and the passenger premium has been refunded." },
+  RESOLVED_ON_TIME: { label: "Collateral Returned", color: "#38bdf8", desc: "Flight was on time. Collateral returned to the Risk NFT holder." },
   UNKNOWN:       { label: "UNKNOWN",          color: "#475569", desc: "" },
 };
 
@@ -145,9 +181,41 @@ function toBytes32(str) { return ethers.encodeBytes32String(str.slice(0, 31)); }
 function fromBytes32(hex) { try { return ethers.decodeBytes32String(hex); } catch { return hex; } }
 function shortAddr(addr) { return addr ? addr.slice(0, 6) + "…" + addr.slice(-4) : "—"; }
 function upperFlightRef(value) { return (value || "").trim().toUpperCase(); }
+function normalizeAirlineCode(value) { return (value || "").trim().toUpperCase(); }
+function normalizeFlightNumber(value) { return (value || "").trim().toUpperCase(); }
+function buildFlightRef(airlineCode = "", flightNumber = "") {
+  return `${normalizeAirlineCode(airlineCode)}${normalizeFlightNumber(flightNumber)}`;
+}
+function splitFlightRef(flightRef = "") {
+  const normalized = upperFlightRef(flightRef);
+  const match = normalized.match(/^([A-Z0-9]{2,3}?)(\d{1,4}[A-Z]*)$/);
+  if (!match) {
+    return { airlineCode: "", flightNumber: normalized };
+  }
+  return {
+    airlineCode: match[1],
+    flightNumber: match[2],
+  };
+}
+function buildFlightLookupKey({ airlineCode = "", flightNumber = "", departureDate = "" }) {
+  return `${normalizeAirlineCode(airlineCode)}|${normalizeFlightNumber(flightNumber)}|${departureDate}`;
+}
+function unixTsToDateInputValue(ts) {
+  const parsed = Number(ts);
+  if (!Number.isFinite(parsed)) return "";
+  return new Date(parsed * 1000).toISOString().slice(0, 10);
+}
 function getCoordinatorContract(contract, coordinatorAddress) {
   if (!contract || !coordinatorAddress || !ethers.isAddress(coordinatorAddress)) return null;
   return new ethers.Contract(coordinatorAddress, COORDINATOR_ABI, contract.runner);
+}
+function getSyndicateManagerContract(contract, managerAddress) {
+  if (!contract || !managerAddress || !ethers.isAddress(managerAddress)) return null;
+  return new ethers.Contract(managerAddress, SYNDICATE_MANAGER_ABI, contract.runner);
+}
+function getRiskVaultContract(contract, vaultAddress) {
+  if (!contract || !vaultAddress || !ethers.isAddress(vaultAddress)) return null;
+  return new ethers.Contract(vaultAddress, RISK_VAULT_ABI, contract.runner);
 }
 function decodeCoordinatorDelay(responseBytes) {
   if (!responseBytes || responseBytes === "0x") return null;
@@ -284,30 +352,107 @@ function readTextValue(value, fallback = "") {
   }
   return fallback;
 }
-function normalizeFlightLookupResponse(payload, fallbackFlightRef = "") {
-  const raw = Array.isArray(payload?.data) ? payload.data[0] : payload;
+function findAppendixEntry(items, code) {
+  const normalizedCode = normalizeAirlineCode(code);
+  if (!normalizedCode || !Array.isArray(items)) return null;
+  return items.find((item) => (
+    normalizeAirlineCode(item?.fs) === normalizedCode ||
+    normalizeAirlineCode(item?.iata) === normalizedCode ||
+    normalizeAirlineCode(item?.icao) === normalizedCode ||
+    normalizeAirlineCode(item?.faa) === normalizedCode
+  )) || null;
+}
+function pickCiriumDateLocal(value) {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "object") return value.dateLocal || value.dateUtc || null;
+  return null;
+}
+function calculateDelayMinutes(currentTime, scheduledTime) {
+  if (!currentTime || !scheduledTime) return null;
+  const currentTs = Date.parse(currentTime);
+  const scheduledTs = Date.parse(scheduledTime);
+  if (!Number.isFinite(currentTs) || !Number.isFinite(scheduledTs)) return null;
+  return Math.max(0, Math.round((currentTs - scheduledTs) / 60000));
+}
+const CIRIUM_STATUS_MAP = {
+  A: "active",
+  C: "cancelled",
+  D: "diverted",
+  DN: "pending_data",
+  L: "landed",
+  NO: "not_operational",
+  R: "redirected",
+  S: "scheduled",
+  U: "unknown",
+};
+function mapCiriumStatus(statusCode) {
+  return CIRIUM_STATUS_MAP[normalizeAirlineCode(statusCode)] || "unknown";
+}
+function pickCiriumDelay(explicitValues, liveTime, scheduledTime) {
+  for (const value of explicitValues) {
+    const parsed = readDelayMins(value);
+    if (parsed !== null) return parsed;
+  }
+  return calculateDelayMinutes(liveTime, scheduledTime);
+}
+function normalizeFlightLookupResponse(payload, fallbackQuery = {}) {
+  const raw = Array.isArray(payload?.flightStatuses) ? payload.flightStatuses[0] : null;
   if (!raw) return null;
+  const airline = findAppendixEntry(payload?.appendix?.airlines, raw.carrierFsCode || fallbackQuery.airlineCode);
+  const departureAirport = findAppendixEntry(payload?.appendix?.airports, raw.departureAirportFsCode);
+  const arrivalAirport = findAppendixEntry(payload?.appendix?.airports, raw.arrivalAirportFsCode);
+  const departureScheduled =
+    pickCiriumDateLocal(raw?.operationalTimes?.scheduledGateDeparture) ||
+    pickCiriumDateLocal(raw?.operationalTimes?.publishedDeparture) ||
+    pickCiriumDateLocal(raw?.departureDate);
+  const departureEstimated =
+    pickCiriumDateLocal(raw?.operationalTimes?.estimatedGateDeparture) ||
+    pickCiriumDateLocal(raw?.operationalTimes?.estimatedRunwayDeparture);
+  const departureActual =
+    pickCiriumDateLocal(raw?.operationalTimes?.actualGateDeparture) ||
+    pickCiriumDateLocal(raw?.operationalTimes?.actualRunwayDeparture);
+  const arrivalScheduled =
+    pickCiriumDateLocal(raw?.operationalTimes?.scheduledGateArrival) ||
+    pickCiriumDateLocal(raw?.operationalTimes?.publishedArrival) ||
+    pickCiriumDateLocal(raw?.arrivalDate);
+  const arrivalEstimated =
+    pickCiriumDateLocal(raw?.operationalTimes?.estimatedGateArrival) ||
+    pickCiriumDateLocal(raw?.operationalTimes?.estimatedRunwayArrival);
+  const arrivalActual =
+    pickCiriumDateLocal(raw?.operationalTimes?.actualGateArrival) ||
+    pickCiriumDateLocal(raw?.operationalTimes?.actualRunwayArrival);
+  const airlineCode = airline?.iata || airline?.fs || fallbackQuery.airlineCode || raw.carrierFsCode || "";
+  const flightNumber = raw.flightNumber || fallbackQuery.flightNumber || "";
   const normalized = {
-    flightRef: upperFlightRef(raw.flightRef || raw.flight?.iata || raw.flight?.icao || fallbackFlightRef),
-    airline: readTextValue(raw.airline?.name || raw.airline, "Unknown airline"),
-    flight_date: readTextValue(raw.flight_date, ""),
-    flight_status: readTextValue(raw.flight_status, "unknown"),
-    departure_airport: readTextValue(raw.departure_airport || raw.departure?.airport, ""),
-    departure_timezone: readTextValue(raw.departure_timezone || raw.departure?.timezone, ""),
-    departure_iata: readTextValue(raw.departure_iata || raw.departure?.iata, ""),
-    departure_terminal: readTextValue(raw.departure_terminal || raw.departure?.terminal, ""),
-    departure_scheduled: raw.departure_scheduled || raw.departure?.scheduled || null,
-    departure_estimated: raw.departure_estimated || raw.departure?.estimated || null,
-    departure_actual: raw.departure_actual || raw.departure?.actual || null,
-    departure_delay_mins: raw.departure_delay_mins ?? raw.departure?.delay ?? null,
-    arrival_airport: readTextValue(raw.arrival_airport || raw.arrival?.airport, ""),
-    arrival_timezone: readTextValue(raw.arrival_timezone || raw.arrival?.timezone, ""),
-    arrival_iata: readTextValue(raw.arrival_iata || raw.arrival?.iata, ""),
-    arrival_terminal: readTextValue(raw.arrival_terminal || raw.arrival?.terminal, ""),
-    arrival_scheduled: raw.arrival_scheduled || raw.arrival?.scheduled || null,
-    arrival_estimated: raw.arrival_estimated || raw.arrival?.estimated || null,
-    arrival_actual: raw.arrival_actual || raw.arrival?.actual || null,
-    arrival_delay_mins: raw.arrival_delay_mins ?? raw.arrival?.delay ?? null,
+    flightRef: upperFlightRef(buildFlightRef(airlineCode, flightNumber)),
+    airline: readTextValue(airline?.name || airlineCode, "Unknown airline"),
+    flight_date: readTextValue(payload?.request?.date?.interpreted || departureScheduled?.split("T")[0] || fallbackQuery.departureDate, ""),
+    flight_status: mapCiriumStatus(raw.status),
+    departure_airport: readTextValue(departureAirport?.name || raw.departureAirportFsCode, ""),
+    departure_timezone: readTextValue(departureAirport?.timeZoneRegionName, ""),
+    departure_iata: readTextValue(departureAirport?.iata || raw.departureAirportFsCode, ""),
+    departure_terminal: readTextValue(raw?.airportResources?.departureTerminal, ""),
+    departure_scheduled: departureScheduled,
+    departure_estimated: departureEstimated,
+    departure_actual: departureActual,
+    departure_delay_mins: pickCiriumDelay(
+      [raw?.delays?.departureGateDelayMinutes, raw?.delays?.departureRunwayDelayMinutes],
+      departureActual || departureEstimated,
+      departureScheduled
+    ),
+    arrival_airport: readTextValue(arrivalAirport?.name || raw.arrivalAirportFsCode, ""),
+    arrival_timezone: readTextValue(arrivalAirport?.timeZoneRegionName, ""),
+    arrival_iata: readTextValue(arrivalAirport?.iata || raw.arrivalAirportFsCode, ""),
+    arrival_terminal: readTextValue(raw?.airportResources?.arrivalTerminal, ""),
+    arrival_scheduled: arrivalScheduled,
+    arrival_estimated: arrivalEstimated,
+    arrival_actual: arrivalActual,
+    arrival_delay_mins: pickCiriumDelay(
+      [raw?.delays?.arrivalGateDelayMinutes, raw?.delays?.arrivalRunwayDelayMinutes],
+      arrivalActual || arrivalEstimated,
+      arrivalScheduled
+    ),
   };
   return normalized.flightRef ? normalized : null;
 }
@@ -323,27 +468,40 @@ function pickFlightDelayDetails(flightInfo) {
   if (arrivalDelay !== null) return { delayMins: arrivalDelay, source: "arrival.delay" };
   return { delayMins: null, source: "none" };
 }
-async function fetchFlightLookupData(flightRef) {
-  const normalizedFlightRef = upperFlightRef(flightRef);
-  if (!normalizedFlightRef) throw new Error("Flight number is required.");
-  if (!AVIATIONSTACK_API_KEY) throw new Error("Missing REACT_APP_AVIATIONSTACK_API_KEY in frontend/.env.");
+async function fetchFlightLookupData(query) {
+  const { airlineCode = "", flightNumber = "", departureDate = "" } = typeof query === "string"
+    ? { ...splitFlightRef(query), departureDate: MIN_LOOKUP_DATE }
+    : query || {};
+  const normalizedAirlineCode = normalizeAirlineCode(airlineCode);
+  const normalizedFlightNumber = normalizeFlightNumber(flightNumber);
+  if (!normalizedAirlineCode) throw new Error("Airline code is required.");
+  if (!normalizedFlightNumber) throw new Error("Flight number is required.");
+  if (!departureDate) throw new Error("Departure date is required.");
+  if (!CIRIUM_API_TOKEN) throw new Error("Missing REACT_APP_CIRIUM_API_TOKEN in frontend/.env.");
 
-  const params = new URLSearchParams({
-    access_key: AVIATIONSTACK_API_KEY,
-    flight_iata: normalizedFlightRef,
-    limit: "1",
-  });
-  const response = await fetch(`${AVIATIONSTACK_BASE_URL}?${params.toString()}`);
+  const response = await fetch(
+    `${CIRIUM_BASE_URL}/flights/status/airline/${encodeURIComponent(normalizedAirlineCode)}/flight-number/${encodeURIComponent(normalizedFlightNumber)}/departure-date/${encodeURIComponent(departureDate)}`,
+    {
+      headers: {
+        Authorization: CIRIUM_API_TOKEN,
+        Accept: "application/json",
+      },
+    }
+  );
   if (!response.ok) {
-    throw new Error(`AviationStack request failed with ${response.status}.`);
+    throw new Error(`Cirium request failed with ${response.status}.`);
   }
   const payload = await response.json();
-  if (payload?.error?.message || payload?.error?.info) {
-    throw new Error(payload.error.message || payload.error.info);
+  if (payload?.error?.errorMessage || payload?.error?.httpStatusCode) {
+    throw new Error(payload.error.errorMessage || `Cirium request failed with ${payload.error.httpStatusCode}.`);
   }
-  const normalizedFlight = normalizeFlightLookupResponse(payload, normalizedFlightRef);
+  const normalizedFlight = normalizeFlightLookupResponse(payload, {
+    airlineCode: normalizedAirlineCode,
+    flightNumber: normalizedFlightNumber,
+    departureDate,
+  });
   if (!normalizedFlight) {
-    throw new Error(`No flight data found for ${normalizedFlightRef}.`);
+    throw new Error(`No flight data found for ${buildFlightRef(normalizedAirlineCode, normalizedFlightNumber)} on ${departureDate}.`);
   }
   return normalizedFlight;
 }
@@ -371,6 +529,52 @@ function calcGas(tx, rcpt) {
   const price = tx.gasPrice ?? tx.maxFeePerGas ?? 0n;
   return fmtEth(rcpt.gasUsed * price);
 }
+function parsePolicyIdValue(value) {
+  try {
+    return String(value);
+  } catch {
+    return "";
+  }
+}
+function subtractBigInts(a, b) {
+  const left = BigInt(a ?? 0);
+  const right = BigInt(b ?? 0);
+  return left > right ? left - right : 0n;
+}
+function safeParseEther(value) {
+  try {
+    return ethers.parseEther(String(value ?? "0").trim() || "0");
+  } catch {
+    return null;
+  }
+}
+function sumPolicyPayouts(entries) {
+  return entries.reduce((total, entry) => total + BigInt(entry?.policy?.fixedPayout ?? 0), 0n);
+}
+function buildFallbackFinalTransfer(ds, policy, roleAddresses) {
+  if (!policy) return "—";
+  if (ds === "PAID") {
+    return `${fmtEth(policy.fixedPayout)} -> Policy NFT holder`;
+  }
+  if (ds === "RESOLVED_ON_TIME") {
+    return `${fmtEth(policy.fixedPayout)} -> Risk NFT holder`;
+  }
+  if (ds === "REFUNDED_UNBID") {
+    return `${fmtEth(policy.maxPremium)} -> ${addrDisplay(policy.passenger, roleAddresses)}`;
+  }
+  if (ds === "UNBID_EXPIRED") {
+    return `${fmtEth(policy.maxPremium)} -> ${addrDisplay(policy.passenger, roleAddresses)} (pending)`;
+  }
+  return "—";
+}
+function describeSettlementOutcome(ds, resolutionState, policy) {
+  if (ds === "PAID") return "Delayed flight";
+  if (ds === "RESOLVED_ON_TIME") return "On-time flight";
+  if (ds === "REFUNDED_UNBID") return "Unbid policy expired";
+  if (ds === "ACTIVE") return "Awaiting settlement.";
+  if (ds === "UNBID_EXPIRED") return "Ready for passenger refund.";
+  return "Settlement details unavailable.";
+}
 function buildTxLog(role, action) {
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -384,16 +588,20 @@ const inputStyle = { background: "#111318", border: "1px solid #2d3445", borderR
 const btnStyle = (color, extra = {}) => ({ background: color + "22", border: `1px solid ${color}55`, borderRadius: 6, color, padding: "8px 18px", fontSize: 13, fontFamily: "monospace", cursor: "pointer", fontWeight: 600, ...extra });
 const disabledBtnStyle = { background: "#1a1e2a", border: "1px solid #3d4455", borderRadius: 6, color: "#94a3b8", padding: "8px 18px", fontSize: 13, fontFamily: "monospace", cursor: "not-allowed", fontWeight: 600 };
 const CLR = { label: "#cbd5e1", value: "#f1f5f9", dim: "#94a3b8", head: "#f1f5f9" };
-const STATUS_PRIORITY = { ACTIVE: 0, UNBID_EXPIRED: 1, BIDDING_OPEN: 2, BIDDING_ENDED: 3, PAID: 4, EXPIRED: 5, UNKNOWN: 6 };
+const STATUS_PRIORITY = { ACTIVE: 0, UNBID_EXPIRED: 1, BIDDING_OPEN: 2, BIDDING_ENDED: 3, PAID: 4, RESOLVED_ON_TIME: 5, REFUNDED_UNBID: 6, UNKNOWN: 7 };
 const RIGHT_PANEL_STATUS_GROUPS = [
   { key: "ACTIVE", title: "Active" },
-  { key: "UNBID_EXPIRED", title: "Expired" },
   { key: "BIDDING_OPEN", title: "Bidding Open" },
   { key: "BIDDING_ENDED", title: "Bidding Ended" },
-  { key: "PAID", title: "Paid" },
-  { key: "EXPIRED", title: "Refunded" },
+  { key: "RESOLVED", title: "Resolved" },
   { key: "UNKNOWN", title: "Other" },
+  { key: "REFUND", title: "Refund" },
 ];
+function rightPanelGroupKey(ds) {
+  if (ds === "PAID" || ds === "RESOLVED_ON_TIME") return "RESOLVED";
+  if (ds === "UNBID_EXPIRED" || ds === "REFUNDED_UNBID") return "REFUND";
+  return ds;
+}
 
 function DerivedStatusBadge({ ds }) {
   const m = DERIVED_META[ds] ?? DERIVED_META.UNKNOWN;
@@ -456,7 +664,8 @@ function sortPolicyEntries(entries) {
 function groupPolicyEntriesByStatus(entries) {
   const grouped = new Map(RIGHT_PANEL_STATUS_GROUPS.map(group => [group.key, []]));
   for (const entry of entries) {
-    const key = grouped.has(entry.ds) ? entry.ds : "UNKNOWN";
+    const groupKey = rightPanelGroupKey(entry.ds);
+    const key = grouped.has(groupKey) ? groupKey : "UNKNOWN";
     grouped.get(key).push(entry);
   }
   return RIGHT_PANEL_STATUS_GROUPS
@@ -551,21 +760,37 @@ function PolicySelectionList({
 // ─────────────────────────────────────────────────────────────────────────────
 function PassengerTab({ contract, readContract, account, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh }) {
   const defaultDepartureTime = apiTimeToBrowserDatetimeLocalValue(pickDepartureTime(DEFAULT_FLIGHT_LOOKUP), DEFAULT_FLIGHT_LOOKUP.departure_timezone) || nowPlusSeconds(3600);
+  const defaultLookupQuery = {
+    airlineCode: "",
+    flightNumber: "",
+    departureDate: "",
+  };
   const [form, setForm] = useState({ flightRef: DEFAULT_FLIGHT_LOOKUP.flightRef, departureTime: defaultDepartureTime, delayThreshold: "60", fixedPayout: "0.5", maxPremium: "0.05", auctionEnd: nowPlusSeconds(120), expiry: defaultDepartureTime });
   const [log, setLog] = useState({ msg: "", err: "" });
   const [policyId, setPolicyId] = useState(null);
   const [policy, setPolicy] = useState(null);
   const [tForm, setTForm] = useState({ to: "", nftId: "" });
   const [tLog, setTLog] = useState({ msg: "", err: "" });
-  const [flightQuery, setFlightQuery] = useState(DEFAULT_FLIGHT_LOOKUP.flightRef);
+  const [flightQuery, setFlightQuery] = useState(defaultLookupQuery);
   const [flightInfo, setFlightInfo] = useState(DEFAULT_FLIGHT_LOOKUP);
   const [isManualFlightEntry, setIsManualFlightEntry] = useState(false);
-  const [flightCache, setFlightCache] = useState({ [DEFAULT_FLIGHT_LOOKUP.flightRef]: DEFAULT_FLIGHT_LOOKUP });
+  const [flightCache, setFlightCache] = useState({});
   const [flightLookupLog, setFlightLookupLog] = useState({ msg: "", err: "" });
   const [isFlightLookupLoading, setIsFlightLookupLoading] = useState(false);
   const normalizedFlightStatus = normalizeFlightStatus(flightInfo.flight_status);
   const canCreatePolicy = isManualFlightEntry || normalizedFlightStatus === "scheduled";
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  const setFlightQueryField = (key) => (e) => {
+    const rawValue = e.target.value;
+    setFlightQuery((current) => ({
+      ...current,
+      [key]: key === "airlineCode"
+        ? normalizeAirlineCode(rawValue)
+        : key === "flightNumber"
+          ? normalizeFlightNumber(rawValue)
+          : rawValue,
+    }));
+  };
   const passengerFields = [
     { key: "flightRef", label: "Flight Ref", type: "text", editable: isManualFlightEntry },
     { key: "departureTime", label: `Departure Time (${BROWSER_TIMEZONE})`, type: "datetime-local", editable: isManualFlightEntry },
@@ -591,14 +816,23 @@ function PassengerTab({ contract, readContract, account, addTxLog, setCurrentPol
   }
 
   async function lookupFlight() {
-    const normalizedFlightRef = upperFlightRef(flightQuery);
-    if (!normalizedFlightRef) {
-      setFlightLookupLog({ msg: "", err: "Please enter a flight number first." });
+    const airlineCode = normalizeAirlineCode(flightQuery.airlineCode);
+    const flightNumber = normalizeFlightNumber(flightQuery.flightNumber);
+    const departureDate = flightQuery.departureDate;
+    const flightRef = buildFlightRef(airlineCode, flightNumber);
+
+    if (!airlineCode || !flightNumber || !departureDate) {
+      setFlightLookupLog({ msg: "", err: "Please enter airline code, flight number, and departure date first." });
       return;
     }
+    if (departureDate < MIN_LOOKUP_DATE) {
+      setFlightLookupLog({ msg: "", err: `Departure date must be on or after ${MIN_LOOKUP_DATE}.` });
+      return;
+    }
+    const cacheKey = buildFlightLookupKey({ airlineCode, flightNumber, departureDate });
 
-    if (flightCache[normalizedFlightRef]) {
-      const cachedFlight = flightCache[normalizedFlightRef];
+    if (flightCache[cacheKey]) {
+      const cachedFlight = flightCache[cacheKey];
       setIsManualFlightEntry(false);
       setFlightInfo(cachedFlight);
       setForm(f => {
@@ -610,21 +844,21 @@ function PassengerTab({ contract, readContract, account, addTxLog, setCurrentPol
           expiry: clampExpiryValue(f.expiry, nextDepartureTime),
         };
       });
-      setFlightLookupLog({ msg: `Loaded ${normalizedFlightRef} from local cache.`, err: "" });
+      setFlightLookupLog({ msg: `Loaded ${flightRef} on ${departureDate} from local cache.`, err: "" });
       return;
     }
 
-    if (!AVIATIONSTACK_API_KEY) {
-      enableManualEntry(normalizedFlightRef);
-      setFlightLookupLog({ msg: "", err: "Missing REACT_APP_AVIATIONSTACK_API_KEY in frontend/.env. Manual entry is now enabled." });
+    if (!CIRIUM_API_TOKEN) {
+      enableManualEntry(flightRef);
+      setFlightLookupLog({ msg: "", err: "Missing REACT_APP_CIRIUM_API_TOKEN in frontend/.env. Manual entry is now enabled." });
       return;
     }
 
     setIsFlightLookupLoading(true);
-    setFlightLookupLog({ msg: `Looking up ${normalizedFlightRef}...`, err: "" });
+    setFlightLookupLog({ msg: `Looking up ${flightRef} on ${departureDate}...`, err: "" });
     try {
-      const normalizedFlight = await fetchFlightLookupData(normalizedFlightRef);
-      setFlightCache(prev => ({ ...prev, [normalizedFlightRef]: normalizedFlight }));
+      const normalizedFlight = await fetchFlightLookupData({ airlineCode, flightNumber, departureDate });
+      setFlightCache(prev => ({ ...prev, [cacheKey]: normalizedFlight }));
       setIsManualFlightEntry(false);
       setFlightInfo(normalizedFlight);
       setForm(f => {
@@ -636,9 +870,9 @@ function PassengerTab({ contract, readContract, account, addTxLog, setCurrentPol
           expiry: clampExpiryValue(f.expiry, nextDepartureTime),
         };
       });
-      setFlightLookupLog({ msg: `Loaded ${normalizedFlight.flightRef}. Departure time has been filled into the policy form.`, err: "" });
+      setFlightLookupLog({ msg: `Loaded ${normalizedFlight.flightRef} on ${normalizedFlight.flight_date || departureDate}. Departure time has been filled into the policy form.`, err: "" });
     } catch (e) {
-      enableManualEntry(normalizedFlightRef);
+      enableManualEntry(flightRef);
       setFlightLookupLog({ msg: "", err: `${parseError(e)} Manual entry is now enabled.` });
     } finally {
       setIsFlightLookupLoading(false);
@@ -689,14 +923,38 @@ function PassengerTab({ contract, readContract, account, addTxLog, setCurrentPol
           <div>
             <div style={{ color: "#4fc3f7", fontFamily: "monospace", fontSize: 13, fontWeight: 700, textTransform: "uppercase" }}>Flight Lookup</div>
           </div>
-          <div style={{ display: "flex", gap: 8, width: "min(100%, 360px)", flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <input
-              value={flightQuery}
-              onChange={e => setFlightQuery(upperFlightRef(e.target.value))}
-              onKeyDown={e => { if (e.key === "Enter") lookupFlight(); }}
-              placeholder="e.g. SQ322"
-              style={{ ...inputStyle, flex: "1 1 220px" }}
-            />
+          <div style={{ display: "grid", gap: 8, width: "min(100%, 520px)", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
+            <div>
+              <label style={{ display: "block", color: CLR.label, fontSize: 12, marginBottom: 4 }}>Airline Code</label>
+              <input
+                value={flightQuery.airlineCode}
+                onChange={setFlightQueryField("airlineCode")}
+                onKeyDown={e => { if (e.key === "Enter") lookupFlight(); }}
+                placeholder="e.g. TR"
+                style={inputStyle}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", color: CLR.label, fontSize: 12, marginBottom: 4 }}>Flight Number</label>
+              <input
+                value={flightQuery.flightNumber}
+                onChange={setFlightQueryField("flightNumber")}
+                onKeyDown={e => { if (e.key === "Enter") lookupFlight(); }}
+                placeholder="e.g. 134"
+                style={inputStyle}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", color: CLR.label, fontSize: 12, marginBottom: 4 }}>Departure Date</label>
+              <input
+                type="date"
+                value={flightQuery.departureDate}
+                min={MIN_LOOKUP_DATE}
+                onChange={setFlightQueryField("departureDate")}
+                onKeyDown={e => { if (e.key === "Enter") lookupFlight(); }}
+                style={inputStyle}
+              />
+            </div>
             <button onClick={lookupFlight} style={btnStyle("#4fc3f7", { whiteSpace: "nowrap" })} disabled={isFlightLookupLoading}>
               {isFlightLookupLoading ? "Searching..." : "Lookup"}
             </button>
@@ -877,6 +1135,562 @@ function UnderwriterTab({ contract, readContract, roleKey, addTxLog, setCurrentP
   );
 }
 
+function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCurrentPolicyId, triggerBalanceRefresh, refreshTick }) {
+  const [vaultCandidates, setVaultCandidates] = useState([]);
+  const [launchedPositions, setLaunchedPositions] = useState([]);
+  const [marketplaceListings, setMarketplaceListings] = useState([]);
+  const [ownedSubscriptions, setOwnedSubscriptions] = useState([]);
+  const [resolvedPositions, setResolvedPositions] = useState([]);
+  const [selectedPolicyId, setSelectedPolicyId] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isLaunching, setIsLaunching] = useState(false);
+  const [buyingPolicyId, setBuyingPolicyId] = useState(null);
+  const [log, setLog] = useState({ msg: "", err: "" });
+  const [blueprint, setBlueprint] = useState({
+    sharesForSale: "60",
+    pricePerShare: "0.0010",
+  });
+  const [buyAmounts, setBuyAmounts] = useState({});
+
+  const selectedVaultCandidate =
+    vaultCandidates.find(({ id }) => String(id) === String(selectedPolicyId)) ||
+    null;
+  const selectedPolicy = selectedVaultCandidate?.policy ?? null;
+  const sharesForSale = Math.max(0, Math.min(100, Number.parseInt(blueprint.sharesForSale || "0", 10) || 0));
+  const retainedShares = Math.max(0, 100 - sharesForSale);
+  const sharePriceWei = safeParseEther(blueprint.pricePerShare);
+  const raiseTargetWei = sharePriceWei === null ? null : sharePriceWei * BigInt(sharesForSale);
+  const maxRaiseWei = selectedPolicy ? (BigInt(selectedPolicy.fixedPayout ?? 0) * BigInt(sharesForSale)) / 100n : null;
+  const listingValueValid = selectedPolicy && sharePriceWei !== null && raiseTargetWei !== null && maxRaiseWei !== null
+    ? raiseTargetWei <= maxRaiseWei
+    : false;
+  const readyCollateralWei = sumPolicyPayouts(vaultCandidates);
+  const launchedCollateralWei = sumPolicyPayouts(launchedPositions);
+  const marketplaceCollateralWei = sumPolicyPayouts(marketplaceListings);
+  const subscribedExposureWei = sumPolicyPayouts(ownedSubscriptions);
+  const managerConfigured = Boolean(SYNDICATE_MANAGER_ADDRESS) && ethers.isAddress(SYNDICATE_MANAGER_ADDRESS);
+  const launchData = sharePriceWei === null
+    ? ""
+    : ethers.AbiCoder.defaultAbiCoder().encode(["uint256", "uint256"], [BigInt(sharesForSale), sharePriceWei]);
+  useEffect(() => {
+    async function fetchSyndicateData() {
+      const reader = readContract ?? contract;
+      if (!reader || !account) {
+        setVaultCandidates([]);
+        setLaunchedPositions([]);
+        setMarketplaceListings([]);
+        setOwnedSubscriptions([]);
+        setResolvedPositions([]);
+        setSelectedPolicyId("");
+        setLog({ msg: "", err: "" });
+        return;
+      }
+
+      setIsLoading(true);
+      setLog({ msg: "", err: "" });
+      try {
+        const normalizedAccount = account.toLowerCase();
+        const managerReader = getSyndicateManagerContract(reader, SYNDICATE_MANAGER_ADDRESS);
+        const count = Number(await reader.policyCount());
+        const loaded = await Promise.all(
+          Array.from({ length: count }, async (_, index) => {
+            const id = index + 1;
+            const policy = await reader.getPolicy(id);
+            if (policy.passenger === ethers.ZeroAddress) return null;
+
+            let riskOwner = "";
+            if (policy.riskNFTId > 0n) {
+              try {
+                riskOwner = await reader.ownerOf(policy.riskNFTId);
+              } catch {
+                riskOwner = "";
+              }
+            }
+
+            let vaultAddress = ethers.ZeroAddress;
+            let vaultDetails = null;
+            if (managerReader) {
+              try {
+                vaultAddress = await managerReader.vaultByPolicyId(id);
+              } catch {
+                vaultAddress = ethers.ZeroAddress;
+              }
+            }
+
+            if (vaultAddress !== ethers.ZeroAddress) {
+              const vaultReader = getRiskVaultContract(reader, vaultAddress);
+              if (vaultReader) {
+                try {
+                  const [sharesForSale, pricePerShare, leadUnderwriter, accountShares, isResolved] = await Promise.all([
+                    vaultReader.sharesForSale(),
+                    vaultReader.pricePerShare(),
+                    vaultReader.leadUnderwriter(),
+                    vaultReader.shareBalances(account),
+                    vaultReader.isResolved(),
+                  ]);
+                  vaultDetails = { sharesForSale, pricePerShare, leadUnderwriter, accountShares, isResolved };
+                } catch {
+                  vaultDetails = null;
+                }
+              }
+            }
+
+            return { id, policy, ds: derivedStatus(policy), riskOwner, vaultAddress, vaultDetails };
+          })
+        );
+
+        const entries = loaded.filter(Boolean);
+        const nextVaultCandidates = entries.filter(({ policy, ds, riskOwner, vaultAddress }) =>
+          ds === "ACTIVE" &&
+          policy.bestUnderwriter?.toLowerCase() === normalizedAccount &&
+          riskOwner?.toLowerCase() === normalizedAccount &&
+          vaultAddress === ethers.ZeroAddress
+        );
+        const nextLaunchedPositions = entries.filter(({ policy, ds, vaultAddress }) =>
+          ds === "ACTIVE" &&
+          policy.bestUnderwriter?.toLowerCase() === normalizedAccount &&
+          vaultAddress !== ethers.ZeroAddress
+        );
+        const nextMarketplaceListings = entries.filter(({ ds, vaultAddress, vaultDetails }) =>
+          ds === "ACTIVE" &&
+          vaultAddress !== ethers.ZeroAddress &&
+          vaultDetails &&
+          Number(vaultDetails.sharesForSale) > 0 &&
+          vaultDetails.leadUnderwriter?.toLowerCase() !== normalizedAccount
+        );
+        const nextOwnedSubscriptions = entries.filter(({ vaultAddress, vaultDetails }) =>
+          vaultAddress !== ethers.ZeroAddress &&
+          vaultDetails &&
+          Number(vaultDetails.accountShares) > 0 &&
+          vaultDetails.leadUnderwriter?.toLowerCase() !== normalizedAccount
+        );
+        const nextResolvedPositions = entries.filter(({ policy, ds }) =>
+          (ds === "PAID" || ds === "RESOLVED_ON_TIME") &&
+          policy.bestUnderwriter?.toLowerCase() === normalizedAccount
+        );
+
+        setVaultCandidates(sortPolicyEntries(nextVaultCandidates));
+        setLaunchedPositions(sortPolicyEntries(nextLaunchedPositions));
+        setMarketplaceListings(sortPolicyEntries(nextMarketplaceListings));
+        setOwnedSubscriptions(sortPolicyEntries(nextOwnedSubscriptions));
+        setResolvedPositions(sortPolicyEntries(nextResolvedPositions));
+        setSelectedPolicyId(current =>
+          nextVaultCandidates.some(({ id }) => String(id) === String(current)) ? current : ""
+        );
+      } catch (e) {
+        setVaultCandidates([]);
+        setLaunchedPositions([]);
+        setMarketplaceListings([]);
+        setOwnedSubscriptions([]);
+        setResolvedPositions([]);
+        setLog({ msg: "", err: parseError(e) });
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchSyndicateData();
+  }, [contract, readContract, account, refreshTick]);
+
+  useEffect(() => {
+    if (!selectedVaultCandidate) return;
+    setCurrentPolicy?.(selectedVaultCandidate.policy);
+    setCurrentPolicyId?.(BigInt(selectedVaultCandidate.id));
+  }, [selectedVaultCandidate, setCurrentPolicy, setCurrentPolicyId]);
+
+  const shellStyle = {
+    background: "#0d1118",
+    border: "1px solid #2f3643",
+    borderRadius: 18,
+    padding: "18px",
+    minWidth: 0,
+  };
+
+  function setBlueprintField(key) {
+    return (e) => {
+      const value = e.target.value;
+      setBlueprint(current => ({ ...current, [key]: value }));
+    };
+  }
+
+  async function launchSyndicate() {
+    if (!selectedVaultCandidate) {
+      setLog({ msg: "", err: "Select a vault-ready policy first." });
+      return;
+    }
+    if (!contract || !account) {
+      setLog({ msg: "", err: "Connect wallet first." });
+      return;
+    }
+    if (!managerConfigured) {
+      setLog({ msg: "", err: "Missing REACT_APP_SYNDICATE_MANAGER_ADDRESS in frontend/.env." });
+      return;
+    }
+    if (sharePriceWei === null) {
+      setLog({ msg: "", err: "Enter a valid ETH price per share first." });
+      return;
+    }
+    if (sharesForSale <= 0 || sharesForSale > 100) {
+      setLog({ msg: "", err: "Shares for sale must be between 1 and 100." });
+      return;
+    }
+    if (!listingValueValid) {
+      setLog({ msg: "", err: "Total listing value cannot exceed the same percentage of fixed payout." });
+      return;
+    }
+    setIsLaunching(true);
+    setLog({ msg: `Creating listing for Policy #${selectedVaultCandidate.id}...`, err: "" });
+    try {
+      const tx = await contract["safeTransferFrom(address,address,uint256,bytes)"](
+        account,
+        SYNDICATE_MANAGER_ADDRESS,
+        selectedVaultCandidate.policy.riskNFTId,
+        launchData
+      );
+      await tx.wait();
+      const manager = getSyndicateManagerContract(contract, SYNDICATE_MANAGER_ADDRESS);
+      const vaultAddress = manager ? await manager.vaultByPolicyId(selectedVaultCandidate.id) : ethers.ZeroAddress;
+      setLog({
+        msg: vaultAddress && vaultAddress !== ethers.ZeroAddress
+          ? `Listing created. Vault created at ${shortAddr(vaultAddress)} for Policy #${selectedVaultCandidate.id}.`
+          : `Listing submitted for Policy #${selectedVaultCandidate.id}. Refreshing vault data now.`,
+        err: "",
+      });
+      triggerBalanceRefresh?.();
+    } catch (e) {
+      setLog({ msg: "", err: parseError(e) });
+    } finally {
+      setIsLaunching(false);
+    }
+  }
+
+  function setBuyAmount(policyId) {
+    return (e) => {
+      const nextValue = e.target.value;
+      setBuyAmounts(current => ({ ...current, [String(policyId)]: nextValue }));
+    };
+  }
+
+  async function buyListingShares(entry) {
+    if (!entry?.vaultAddress) {
+      setLog({ msg: "", err: "Vault address is missing for this listing." });
+      return;
+    }
+    if (!contract || !account) {
+      setLog({ msg: "", err: "Connect wallet first." });
+      return;
+    }
+    const rawAmount = buyAmounts[String(entry.id)] || "1";
+    const amountToBuy = Number.parseInt(rawAmount, 10) || 0;
+    if (amountToBuy <= 0) {
+      setLog({ msg: "", err: "Enter a valid share amount to buy." });
+      return;
+    }
+    const sharesAvailable = Number(entry.vaultDetails?.sharesForSale ?? 0);
+    if (amountToBuy > sharesAvailable) {
+      setLog({ msg: "", err: `Only ${sharesAvailable} shares are currently available.` });
+      return;
+    }
+    const pricePerShareWei = BigInt(entry.vaultDetails?.pricePerShare ?? 0);
+    if (pricePerShareWei <= 0n) {
+      setLog({ msg: "", err: "This listing does not have a valid price." });
+      return;
+    }
+
+    const totalCost = pricePerShareWei * BigInt(amountToBuy);
+    const vault = getRiskVaultContract(contract, entry.vaultAddress);
+    if (!vault) {
+      setLog({ msg: "", err: "Vault contract is not available." });
+      return;
+    }
+
+    setBuyingPolicyId(entry.id);
+    setLog({ msg: `Submitting buy order for Policy #${entry.id}...`, err: "" });
+    try {
+      const tx = await vault.buyShares(amountToBuy, { value: totalCost });
+      await tx.wait();
+      setLog({ msg: `Bought ${amountToBuy} share${amountToBuy === 1 ? "" : "s"} from Policy #${entry.id}.`, err: "" });
+      setBuyAmounts(current => ({ ...current, [String(entry.id)]: "" }));
+      triggerBalanceRefresh?.();
+    } catch (e) {
+      setLog({ msg: "", err: parseError(e) });
+    } finally {
+      setBuyingPolicyId(null);
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 }}>
+        {[
+          { label: "Vault-Ready Positions", value: String(vaultCandidates.length), tone: "#fb923c", sub: "ACTIVE policies where you still hold the Risk NFT" },
+          { label: "Listed Risk Vaults", value: String(launchedPositions.length), tone: "#f97316", sub: `${fmtEth(launchedCollateralWei)} of risk now listed through the marketplace` },
+          { label: "Open Marketplace", value: String(marketplaceListings.length), tone: "#38bdf8", sub: `${fmtEth(marketplaceCollateralWei)} of external risk currently available to subscribe` },
+          { label: "Your Positions", value: String(ownedSubscriptions.length), tone: "#22c55e", sub: `${fmtEth(subscribedExposureWei)} of subscribed risk tracked in your portfolio` },
+        ].map(card => (
+          <div key={card.label} style={{ background: "#0d1118", border: `1px solid ${card.tone}44`, borderRadius: 16, padding: "16px 18px" }}>
+            <div style={{ color: card.tone, fontSize: 11, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>{card.label}</div>
+            <div style={{ color: "#fff7ed", fontSize: 28, fontWeight: 700, marginBottom: 6 }}>{card.value}</div>
+            <div style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.5 }}>{card.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(340px, 1.05fr) minmax(340px, 1fr)", gap: 18, alignItems: "start" }}>
+        <div style={{ display: "grid", gap: 18 }}>
+          <section style={shellStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ color: "#fb923c", fontSize: 12, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>Vault Launchpad</div>
+                <div style={{ color: "#94a3b8", fontSize: 12 }}>Policies that are already underwritten by you and ready to move into a dedicated vault.</div>
+              </div>
+              <button onClick={triggerBalanceRefresh} style={btnStyle("#fb923c")}>
+                {isLoading ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+
+            {!vaultCandidates.length ? (
+              <div style={{ padding: "20px 0", color: "#94a3b8", fontSize: 13, lineHeight: 1.7 }}>
+                {isLoading
+                  ? "Loading vault candidates from chain..."
+                  : "No available positions right now."}
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                {vaultCandidates.map(({ id, policy, ds }) => {
+                  const isSelected = String(id) === String(selectedVaultCandidate?.id);
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => setSelectedPolicyId(String(id))}
+                      style={{
+                        background: isSelected ? "#2b1a11" : "#11161f",
+                        border: `1px solid ${isSelected ? "#fb923c88" : "#253041"}`,
+                        borderRadius: 14,
+                        padding: "14px",
+                        textAlign: "left",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                        <div style={{ color: "#fff", fontSize: 14, fontFamily: "monospace", fontWeight: 700 }}>Policy #{id}</div>
+                        <DerivedStatusBadge ds={ds} />
+                      </div>
+                      <div style={{ display: "grid", gap: 5, fontSize: 12 }}>
+                        <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(policy.flightRef)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.departureTime)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Fixed Payout:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(policy.fixedPayout)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Risk NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>#{policy.riskNFTId.toString()}</span></div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          <section style={{ ...shellStyle, background: "linear-gradient(180deg, #151b23 0%, #0d1118 100%)" }}>
+            <div style={{ color: "#fdba74", fontSize: 12, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 10 }}>
+              Listing Builder
+            </div>
+            {selectedPolicy ? (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 12 }}>
+                  <div><span style={{ color: CLR.dim }}>Flight Number:</span><div style={{ color: "#fff7ed", fontFamily: "monospace", marginTop: 4 }}>{fromBytes32(selectedPolicy.flightRef)}</div></div>
+                  <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span><div style={{ color: "#fff7ed", fontFamily: "monospace", marginTop: 4 }}>{tsToLocal(selectedPolicy.departureTime)}</div></div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 16 }}>
+                  <div><span style={{ color: CLR.dim }}>Risk NFT:</span><div style={{ color: "#fff7ed", fontFamily: "monospace", marginTop: 4 }}>#{selectedPolicy.riskNFTId.toString()}</div></div>
+                  <div><span style={{ color: CLR.dim }}>Fixed Payout:</span><div style={{ color: "#fff7ed", fontFamily: "monospace", marginTop: 4 }}>{fmtEth(selectedPolicy.fixedPayout)}</div></div>
+                  <div><span style={{ color: CLR.dim }}>Best Premium:</span><div style={{ color: "#fff7ed", fontFamily: "monospace", marginTop: 4 }}>{fmtEth(selectedPolicy.bestPremium)}</div></div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 16 }}>
+                  <div>
+                    <label style={{ display: "block", color: CLR.label, fontSize: 12, marginBottom: 4 }}>Shares For Sale</label>
+                    <input value={blueprint.sharesForSale} onChange={setBlueprintField("sharesForSale")} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", color: CLR.label, fontSize: 12, marginBottom: 4 }}>Price Per Share (ETH)</label>
+                    <input value={blueprint.pricePerShare} onChange={setBlueprintField("pricePerShare")} style={inputStyle} />
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 16 }}>
+                  <div style={{ background: "#11161f", border: "1px solid #2d3445", borderRadius: 12, padding: "12px 14px" }}>
+                    <div style={{ color: "#94a3b8", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Lead Retention</div>
+                    <div style={{ color: "#fff", fontSize: 22, fontWeight: 700 }}>{retainedShares}%</div>
+                  </div>
+                  <div style={{ background: "#11161f", border: "1px solid #2d3445", borderRadius: 12, padding: "12px 14px" }}>
+                    <div style={{ color: "#94a3b8", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Raise Target</div>
+                    <div style={{ color: listingValueValid ? "#fff" : "#fda4af", fontSize: 22, fontWeight: 700 }}>{raiseTargetWei === null ? "Invalid" : fmtEth(raiseTargetWei)}</div>
+                    <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>
+                      Max allowed {maxRaiseWei === null ? "—" : fmtEth(maxRaiseWei)}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+                  <button
+                    onClick={launchSyndicate}
+                    disabled={isLaunching || !selectedVaultCandidate || selectedVaultCandidate.vaultAddress !== ethers.ZeroAddress || !managerConfigured || sharePriceWei === null || sharesForSale <= 0 || !listingValueValid}
+                    style={isLaunching || !selectedVaultCandidate || selectedVaultCandidate.vaultAddress !== ethers.ZeroAddress || !managerConfigured || sharePriceWei === null || sharesForSale <= 0 || !listingValueValid ? disabledBtnStyle : btnStyle("#fb923c")}
+                  >
+                    {isLaunching ? "Creating..." : "Create Listing"}
+                  </button>
+                </div>
+                {!listingValueValid && selectedPolicy && (
+                  <div style={{ marginTop: 12, color: "#fda4af", fontSize: 12, lineHeight: 1.6 }}>
+                    Listing value is too high. If you sell {sharesForSale}% of the risk side, the total raise must stay at or below {fmtEth(maxRaiseWei)}.
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.7 }}>
+                Click an active policy in Vault Launchpad above to view and configure its listing details.
+              </div>
+            )}
+          </section>
+
+          <section style={shellStyle}>
+            <div style={{ color: "#f97316", fontSize: 12, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 12 }}>
+              Your Managed Vaults
+            </div>
+            {!launchedPositions.length ? (
+              <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.7 }}>
+                No active managed vaults yet. Once you create a marketplace listing, its policy-specific vault address will appear here.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                {launchedPositions.map(({ id, policy, ds, vaultAddress }) => (
+                  <div
+                    key={id}
+                    style={{
+                      background: "#11161f",
+                      border: "1px solid #2d3445",
+                      borderRadius: 12,
+                      padding: "12px 14px",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                      <div style={{ color: "#fff", fontFamily: "monospace", fontWeight: 700 }}>Policy #{id}</div>
+                      <DerivedStatusBadge ds={ds} />
+                    </div>
+                    <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                      <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(policy.flightRef)}</span></div>
+                      <div><span style={{ color: CLR.dim }}>Fixed Payout:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(policy.fixedPayout)}</span></div>
+                      <div><span style={{ color: CLR.dim }}>Risk NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>#{policy.riskNFTId.toString()}</span></div>
+                      <div><span style={{ color: CLR.dim }}>Vault:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{vaultAddress}</span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div style={{ display: "grid", gap: 18 }}>
+          <section style={shellStyle}>
+          <div style={{ color: "#38bdf8", fontSize: 12, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 12 }}>
+            Open Marketplace
+          </div>
+          {!marketplaceListings.length ? (
+            <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.7 }}>
+              No external listings are open right now. Once another underwriter lists a Risk NFT with remaining shares for sale, it will appear here for subscription.
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
+              {marketplaceListings.map((entry) => {
+                const sharesAvailable = Number(entry.vaultDetails?.sharesForSale ?? 0);
+                const accountShares = Number(entry.vaultDetails?.accountShares ?? 0);
+                const pricePerShare = BigInt(entry.vaultDetails?.pricePerShare ?? 0);
+                const buyAmount = buyAmounts[String(entry.id)] || "1";
+                const parsedBuyAmount = Number.parseInt(buyAmount, 10) || 0;
+                const totalCost = parsedBuyAmount > 0 ? pricePerShare * BigInt(parsedBuyAmount) : 0n;
+                const isBuyingThis = buyingPolicyId === entry.id;
+                return (
+                  <div key={entry.id} style={{ background: "#11161f", border: "1px solid #2d3445", borderRadius: 12, padding: "14px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                      <div style={{ color: "#fff", fontFamily: "monospace", fontWeight: 700 }}>Policy #{entry.id}</div>
+                      <DerivedStatusBadge ds={entry.ds} />
+                    </div>
+                    <div style={{ display: "grid", gap: 5, fontSize: 12, marginBottom: 12 }}>
+                      <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(entry.policy.flightRef)}</span></div>
+                      <div><span style={{ color: CLR.dim }}>Lead UW:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{shortAddr(entry.vaultDetails?.leadUnderwriter)}</span></div>
+                      <div><span style={{ color: CLR.dim }}>Shares Available:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{sharesAvailable}</span></div>
+                      <div><span style={{ color: CLR.dim }}>Price / Share:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(pricePerShare)}</span></div>
+                      <div><span style={{ color: CLR.dim }}>Your Shares:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{accountShares}</span></div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 10, alignItems: "center" }}>
+                      <input value={buyAmount} onChange={setBuyAmount(entry.id)} style={inputStyle} />
+                      <button
+                        onClick={() => buyListingShares(entry)}
+                        disabled={isBuyingThis || parsedBuyAmount <= 0 || parsedBuyAmount > sharesAvailable}
+                        style={isBuyingThis || parsedBuyAmount <= 0 || parsedBuyAmount > sharesAvailable ? disabledBtnStyle : btnStyle("#38bdf8")}
+                      >
+                        {isBuyingThis ? "Buying..." : `Buy for ${fmtEth(totalCost)}`}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          </section>
+
+          <section style={shellStyle}>
+            <div style={{ color: "#22c55e", fontSize: 12, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 12 }}>
+              Your Risk Positions
+            </div>
+            {!ownedSubscriptions.length ? (
+              <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.7 }}>
+                You have not subscribed to any marketplace shares yet. Once you buy from the marketplace, your positions will appear here.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                {ownedSubscriptions.map(({ id, policy, ds, vaultAddress, vaultDetails }) => {
+                  const accountShares = Number(vaultDetails?.accountShares ?? 0);
+                  const pricePerShare = BigInt(vaultDetails?.pricePerShare ?? 0);
+                  const costBasisWei = pricePerShare * BigInt(accountShares);
+                  const collateralExposureWei = (BigInt(policy.fixedPayout ?? 0) * BigInt(accountShares)) / 100n;
+                  return (
+                    <div
+                      key={id}
+                      style={{
+                        background: "#11161f",
+                        border: "1px solid #2d3445",
+                        borderRadius: 12,
+                        padding: "12px 14px",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                        <div style={{ color: "#fff", fontFamily: "monospace", fontWeight: 700 }}>Policy #{id}</div>
+                        <DerivedStatusBadge ds={ds} />
+                      </div>
+                      <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                        <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(policy.flightRef)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.departureTime)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Your Shares:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{accountShares}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Avg Price / Share:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(pricePerShare)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Cost Basis:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(costBasisWei)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Risk Exposure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(collateralExposureWei)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Vault:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{vaultAddress}</span></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+
+      <Log {...log} />
+    </div>
+  );
+}
+
 function ResolverTab({ contract, readContract, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh, account }) {
   const [policyId, setPolicyId] = useState("");
   const [policy, setPolicy] = useState(null);
@@ -955,18 +1769,26 @@ function ResolverTab({ contract, readContract, addTxLog, setCurrentPolicy, setCu
       setLog({ msg: "", err: "This policy has no valid flight number." });
       return;
     }
+    const lookupQuery = {
+      ...splitFlightRef(flightRef),
+      departureDate: unixTsToDateInputValue(policy.departureTime),
+    };
+    if (!lookupQuery.airlineCode || !lookupQuery.flightNumber || !lookupQuery.departureDate) {
+      setLog({ msg: "", err: "This policy cannot be converted into a valid Cirium lookup query." });
+      return;
+    }
     setIsResolving(true);
-    setLog({ msg: "Fetching delay data from AviationStack...", err: "" });
+    setLog({ msg: "Fetching delay data from Cirium...", err: "" });
     try {
-      const flightInfo = await fetchFlightLookupData(flightRef);
+      const flightInfo = await fetchFlightLookupData(lookupQuery);
       const delayDetails = pickFlightDelayDetails(flightInfo);
       if (delayDetails.delayMins === null) {
-        throw new Error(`AviationStack did not return a usable delay field for ${flightRef} yet.`);
+        throw new Error(`Cirium did not return a usable delay field for ${flightRef} yet.`);
       }
       const tx = await contract.resolvePolicy(policyId, delayDetails.delayMins);
       await tx.wait();
-      addTxLog(buildTxLog("resolver", `Resolved Policy #${policyId} from AviationStack ${delayDetails.source} = ${delayDetails.delayMins} min`));
-      setLog({ msg: `Resolved from AviationStack. ${delayDetails.source} reported ${delayDetails.delayMins} minutes of delay.`, err: "" });
+      addTxLog(buildTxLog("resolver", `Resolved Policy #${policyId} from Cirium ${delayDetails.source} = ${delayDetails.delayMins} min`));
+      setLog({ msg: `Resolved from Cirium. ${delayDetails.source} reported ${delayDetails.delayMins} minutes of delay.`, err: "" });
       loadPolicy(); fetchPolicies(); triggerBalanceRefresh();
     } catch (e) { setLog({ msg: "", err: parseError(e) }); }
     finally { setIsResolving(false); }
@@ -975,7 +1797,7 @@ function ResolverTab({ contract, readContract, addTxLog, setCurrentPolicy, setCu
   const resolveAfterTs = policy ? settlementReadyTs(policy) : 0;
   const resolveWindowMessage = policy
     ? canResolve
-      ? "Resolve is unlocked. Clicking the button will fetch the delay field from AviationStack."
+      ? "Resolve is unlocked. Clicking the button will fetch the delay field from Cirium."
       : `Resolve unlocks at ${tsToLocal(resolveAfterTs)}.`
     : "";
 
@@ -990,7 +1812,7 @@ function ResolverTab({ contract, readContract, addTxLog, setCurrentPolicy, setCu
         onRefresh={fetchPolicies}
         accentColor="#f59e0b"
         title="Policies Awaiting API Settlement"
-        subtitle="Resolver cannot enter delay minutes manually. Resolve uses AviationStack delay data."
+        subtitle="Resolver cannot enter delay minutes manually. Resolve uses Cirium delay data."
       />
       <PolicyCard policy={policy} policyId={policyId} roleAddresses={roleAddresses} />
       {policy && (
@@ -1023,6 +1845,8 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
     pendingPolicyId: null,
   });
   const [policySettlementStates, setPolicySettlementStates] = useState({});
+  const [policyResolutionStates, setPolicyResolutionStates] = useState({});
+  const [policyAuctionStates, setPolicyAuctionStates] = useState({});
 
   useEffect(() => {
     async function fetchRelevantPolicies() {
@@ -1089,7 +1913,7 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
                     ? "Underwritten by you"
                     : ds === "BIDDING_ENDED"
                       ? "Waiting for your finalization"
-                      : ds === "PAID" || ds === "EXPIRED"
+                      : ds === "PAID" || ds === "RESOLVED_ON_TIME"
                         ? "Previously underwritten by you"
                         : "You are currently winning"
                   : "You placed a bid";
@@ -1106,7 +1930,7 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
                   ? "Underwritten by you"
                   : ds === "BIDDING_ENDED"
                     ? "Waiting for your finalization"
-                    : ds === "PAID" || ds === "EXPIRED"
+                    : ds === "PAID" || ds === "RESOLVED_ON_TIME"
                       ? "Previously underwritten by you"
                       : "You are currently winning",
               }));
@@ -1189,18 +2013,16 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
         return;
       }
 
-      const activePolicyIds = relatedPolicies
-        .filter(({ ds }) => ds === "ACTIVE")
-        .map(({ id }) => Number(id));
+      const trackedPolicyIds = relatedPolicies.map(({ id }) => Number(id));
 
-      if (!activePolicyIds.length) {
+      if (!trackedPolicyIds.length) {
         if (!cancelled) setPolicySettlementStates({});
         return;
       }
 
       try {
         const entries = await Promise.all(
-          activePolicyIds.map(async (id) => {
+          trackedPolicyIds.map(async (id) => {
             const [pendingRequestId, lastRequestId, lastResponse, lastError] = await reader.getPolicySettlementState(id);
             return [String(id), { pendingRequestId, lastRequestId, lastResponse, lastError }];
           })
@@ -1222,6 +2044,79 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
       if (timerId) window.clearInterval(timerId);
     };
   }, [contract, readContract, roleAddresses.resolver, relatedPolicies, refreshTick]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchPolicyLifecycleEvents() {
+      const reader = readContract ?? contract;
+      if (!reader || !relatedPolicies.length) {
+        if (!cancelled) {
+          setPolicyResolutionStates({});
+          setPolicyAuctionStates({});
+        }
+        return;
+      }
+
+      try {
+        const latestBlock = await reader.runner.provider.getBlockNumber();
+        const fromBlock = latestBlock < DEPLOY_BLOCK ? 0 : DEPLOY_BLOCK;
+        const policyIds = relatedPolicies.map(({ id }) => Number(id));
+
+        const [resolutionEntries, auctionEntries] = await Promise.all([
+          Promise.all(
+            policyIds.map(async (id) => {
+              const events = await reader.queryFilter(reader.filters.PolicyResolved(id), fromBlock, latestBlock);
+              const latest = events.at(-1);
+              if (!latest?.args) return [String(id), null];
+              return [
+                String(id),
+                {
+                  recipient: latest.args.recipient,
+                  amount: latest.args.amount,
+                  result: Number(latest.args.result),
+                  txHash: latest.transactionHash,
+                },
+              ];
+            })
+          ),
+          Promise.all(
+            policyIds.map(async (id) => {
+              const events = await reader.queryFilter(reader.filters.AuctionFinalized(id), fromBlock, latestBlock);
+              const latest = events.at(-1);
+              if (!latest?.args) return [String(id), null];
+              return [
+                String(id),
+                {
+                  underwriter: latest.args.underwriter,
+                  premiumPaid: latest.args.premiumPaid,
+                  refundToPassenger: latest.args.refundToPassenger,
+                  policyNFTId: latest.args.policyNFTId,
+                  riskNFTId: latest.args.riskNFTId,
+                  txHash: latest.transactionHash,
+                },
+              ];
+            })
+          ),
+        ]);
+
+        if (!cancelled) {
+          setPolicyResolutionStates(Object.fromEntries(resolutionEntries.filter(([, value]) => value)));
+          setPolicyAuctionStates(Object.fromEntries(auctionEntries.filter(([, value]) => value)));
+        }
+      } catch {
+        if (!cancelled) {
+          setPolicyResolutionStates({});
+          setPolicyAuctionStates({});
+        }
+      }
+    }
+
+    fetchPolicyLifecycleEvents();
+    return () => {
+      cancelled = true;
+    };
+  }, [contract, readContract, relatedPolicies, refreshTick]);
 
   async function refundExpiredPolicy(targetPolicyId) {
     if (!contract) {
@@ -1360,6 +2255,13 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
                     lastResponse: "0x",
                     lastError: "0x",
                   };
+                  const resolutionState = policyResolutionStates[String(id)] || null;
+                  const auctionState = policyAuctionStates[String(id)] || null;
+                  const premiumPaid = auctionState?.premiumPaid ?? (policy.policyNFTId > 0n ? policy.bestPremium : null);
+                  const passengerRefund = auctionState?.refundToPassenger ?? (policy.policyNFTId > 0n ? subtractBigInts(policy.maxPremium, policy.bestPremium) : null);
+                  const finalTransferText = resolutionState
+                    ? `${fmtEth(resolutionState.amount)} -> ${addrDisplay(resolutionState.recipient, roleAddresses)}`
+                    : buildFallbackFinalTransfer(ds, policy, roleAddresses);
                   const decodedLastDelay = decodeCoordinatorDelay(policySettlementState.lastResponse);
                   const decodedLastError = decodeCoordinatorError(policySettlementState.lastError);
                   const isRefunding = refundingPolicyId === id;
@@ -1387,6 +2289,7 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
                       {shouldShowRelation && <div style={{ color: panelMeta.accent, fontSize: 12, marginBottom: 8 }}>{relation}</div>}
                       <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
                         <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(policy.flightRef)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.departureTime)}</span></div>
                         <div><span style={{ color: CLR.dim }}>Passenger:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{shortAddr(policy.passenger)}</span></div>
                         <div><span style={{ color: CLR.dim }}>Best Premium:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{bestPremium}</span></div>
                         <div><span style={{ color: CLR.dim }}>Best UW:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{addrDisplay(policy.bestUnderwriter, roleAddresses)}</span></div>
@@ -1400,6 +2303,18 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
                           <div><span style={{ color: CLR.dim }}>Max Premium:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(policy.maxPremium)}</span></div>
                           <div><span style={{ color: CLR.dim }}>Policy NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{policy.policyNFTId > 0n ? `#${policy.policyNFTId}` : "(not minted)"}</span></div>
                           <div><span style={{ color: CLR.dim }}>Risk NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{policy.riskNFTId > 0n ? `#${policy.riskNFTId}` : "(not minted)"}</span></div>
+                          {(resolutionState || auctionState || decodedLastDelay !== null || ds === "PAID" || ds === "RESOLVED_ON_TIME" || ds === "UNBID_EXPIRED") && ds !== "REFUNDED_UNBID" && (
+                            <div style={{ marginTop: 8, paddingTop: 10, borderTop: "1px solid #253041", display: "grid", gap: 4 }}>
+                              <div style={{ color: panelMeta.accent, fontSize: 12, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase", marginBottom: 2 }}>
+                                Settlement Summary
+                              </div>
+                              <div><span style={{ color: CLR.dim }}>Outcome:</span> <span style={{ color: CLR.value }}>{describeSettlementOutcome(ds, resolutionState, policy)}</span></div>
+                              <div><span style={{ color: CLR.dim }}>Delay Used:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{decodedLastDelay === null ? "—" : `${decodedLastDelay} min`}</span></div>
+                              <div><span style={{ color: CLR.dim }}>Final Transfer:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{finalTransferText}</span></div>
+                              {resolutionState?.txHash && <div><span style={{ color: CLR.dim }}>Settlement Tx:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{shortAddr(resolutionState.txHash)}</span></div>}
+                              {auctionState?.txHash && <div><span style={{ color: CLR.dim }}>Auction Finalized Tx:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{shortAddr(auctionState.txHash)}</span></div>}
+                            </div>
+                          )}
                           {shouldShowSettlementBlock && (
                             <div style={{ marginTop: 8 }}>
                               <div style={{ color: isSettlementUnlocked ? "#fcd34d" : "#94a3b8", fontSize: 12, marginBottom: 8, fontFamily: "monospace" }}>
@@ -1564,9 +2479,10 @@ export default function App() {
   const availableModes = account ? [
     { key: "passenger", label: "Passenger", color: ROLE_META.passenger.color },
     { key: "underwriter", label: "Underwriter", color: ROLE_META.underwriter.color },
+    { key: "syndicate", label: "Risk NFT Marketplace", color: ROLE_META.syndicate.color },
     ...(isResolverAccount ? [{ key: "resolver", label: "Resolver", color: ROLE_META.resolver.color }] : []),
   ] : [];
-  const sharedProps = { contract, readContract: readOnlyContract, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh, account };
+  const sharedProps = { contract, readContract: readOnlyContract, addTxLog, setCurrentPolicy, setCurrentPolicyId, setNftOwners, roleAddresses, triggerBalanceRefresh, account, refreshTick };
 
   return (
     <div style={{ height: "100vh", background: "#0a0c10", color: "#e2e8f0", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -1594,18 +2510,21 @@ export default function App() {
       {connLog && <div style={{ margin: "12px 20px 0", padding: "10px 14px", background: "#7c2d1222", border: "1px solid #ef444444", borderRadius: 6, color: "#fca5a5", fontSize: 13, fontFamily: "monospace" }}>⚠️ {connLog}</div>}
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        <div style={{ flex: 3, padding: "20px", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+        <div style={{ flex: activeMode === "syndicate" ? 1 : 3, padding: "20px", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
           {!account ? (
             <div style={{ textAlign: "center", padding: "100px 0" }}>👋 Please connect wallet to start</div>
           ) : (
             <>
               {activeMode === "passenger" && <PassengerView sharedProps={sharedProps} />}
               {activeMode === "underwriter" && <UnderwriterView sharedProps={sharedProps} roleKey="underwriter" />}
+              {activeMode === "syndicate" && <SyndicateView sharedProps={sharedProps} />}
               {activeMode === "resolver" && <ResolverView sharedProps={sharedProps} />}
             </>
           )}
         </div>
-        <RightPanel contract={contract} readContract={readOnlyContract} account={account} roleAddresses={roleAddresses} currentPolicyId={currentPolicyId} txLog={txLog} refreshTick={refreshTick} activeMode={activeMode} addTxLog={addTxLog} triggerBalanceRefresh={triggerBalanceRefresh} />
+        {activeMode !== "syndicate" && (
+          <RightPanel contract={contract} readContract={readOnlyContract} account={account} roleAddresses={roleAddresses} currentPolicyId={currentPolicyId} txLog={txLog} refreshTick={refreshTick} activeMode={activeMode} addTxLog={addTxLog} triggerBalanceRefresh={triggerBalanceRefresh} />
+        )}
       </div>
     </div>
   );

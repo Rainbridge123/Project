@@ -9,9 +9,12 @@
     "node": "hardhat node",
     "deploy:local": "hardhat run scripts/deploy.js --network localhost",
     "deploy:sepolia": "hardhat run scripts/deploy-sepolia-chainlink.js --network sepolia",
+    "deploy:sepolia-coordinator": "hardhat run scripts/deploy-sepolia-coordinator-only.js --network sepolia",
+    "deploy:risk-vault": "hardhat run scripts/deploy-risk-vault.js",
+    "deploy:syndicate-manager": "hardhat run scripts/deploy-syndicate-manager.js",
+    "test:cirium-request": "node scripts/test-cirium-delay.js",
     "upload-don-secrets": "node scripts/upload-don-secrets.js",
-    "auto-settle:local": "hardhat run scripts/auto-settle.js --network localhost",
-    "auto-settle:local:once": "AUTO_SETTLE_ONCE=true hardhat run scripts/auto-settle.js --network localhost"
+    "update:sepolia-coordinator": "hardhat run scripts/update-sepolia-coordinator.js --network sepolia"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",

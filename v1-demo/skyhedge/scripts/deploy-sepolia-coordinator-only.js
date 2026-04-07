@@ -16,6 +16,17 @@ function parseDonId(value) {
 
 async function main() {
   const [deployer] = await hre.ethers.getSigners();
+  const coreAddress =
+    process.env.SKYHEDGE_SEPOLIA_CONTRACT_ADDRESS ||
+    process.env.REACT_APP_SEPOLIA_CONTRACT_ADDRESS ||
+    "";
+
+  if (!coreAddress) {
+    throw new Error(
+      "Missing SKYHEDGE_SEPOLIA_CONTRACT_ADDRESS or REACT_APP_SEPOLIA_CONTRACT_ADDRESS in .env."
+    );
+  }
+
   const sourceCode = fs.readFileSync(
     path.join(__dirname, "..", "chainlink", "functions", "ciriumDelay.js"),
     "utf8"
@@ -28,15 +39,13 @@ async function main() {
   const secretsSlotId = process.env.CHAINLINK_FUNCTIONS_DON_SECRETS_SLOT_ID;
   const secretsVersion = process.env.CHAINLINK_FUNCTIONS_DON_SECRETS_VERSION;
 
-  console.log("Deploying Chainlink Sepolia setup with:", deployer.address);
+  console.log("Deploying replacement Sepolia coordinator with:", deployer.address);
+  console.log("Using existing core:", coreAddress);
 
-  const CoreFactory = await hre.ethers.getContractFactory("SkyHedgeCoreChainlink");
-  const core = await CoreFactory.deploy(deployer.address);
-  await core.waitForDeployment();
-
+  const core = await hre.ethers.getContractAt("SkyHedgeCoreChainlink", coreAddress, deployer);
   const CoordinatorFactory = await hre.ethers.getContractFactory("SkyHedgeOracleCoordinator");
   const coordinator = await CoordinatorFactory.deploy(
-    await core.getAddress(),
+    coreAddress,
     functionsRouter,
     donId,
     subscriptionId,
@@ -45,8 +54,12 @@ async function main() {
   );
   await coordinator.waitForDeployment();
 
-  const setTx = await core.setOracleCoordinator(await coordinator.getAddress());
+  const coordinatorAddress = await coordinator.getAddress();
+  console.log("New coordinator deployed:", coordinatorAddress);
+
+  const setTx = await core.setOracleCoordinator(coordinatorAddress);
   await setTx.wait();
+  console.log("Core updated to use new coordinator:", setTx.hash);
 
   if (secretsSlotId && secretsVersion) {
     const secretsTx = await coordinator.setDONHostedSecrets(
@@ -54,26 +67,17 @@ async function main() {
       Number(secretsVersion)
     );
     await secretsTx.wait();
+    console.log(
+      `DON-hosted secrets configured on new coordinator: slot=${Number(secretsSlotId)}, version=${Number(secretsVersion)}`
+    );
+  } else {
+    console.log("DON-hosted secrets were not configured because slot/version are missing.");
   }
 
-  console.log("\n✅ SkyHedgeCoreChainlink deployed to:", await core.getAddress());
-  console.log("✅ SkyHedgeOracleCoordinator deployed to:", await coordinator.getAddress());
-  console.log("   Functions router:", functionsRouter);
-  console.log("   DON ID:", donId);
-  console.log("   Subscription ID:", subscriptionId);
-  console.log("   Callback gas limit:", callbackGasLimit);
-  if (secretsSlotId && secretsVersion) {
-    console.log("   DON-hosted secrets slot:", Number(secretsSlotId));
-    console.log("   DON-hosted secrets version:", Number(secretsVersion));
-  } else {
-    console.log("   DON-hosted secrets:", "(not configured yet)");
-  }
-  console.log("\n📋 Next steps:");
-  console.log("   1. Fund the Functions subscription with LINK.");
-  console.log("   2. Add the coordinator contract as a consumer on that subscription.");
-  console.log("   3. Upload DON-hosted secrets and record the slot ID + version.");
-  console.log("   4. Register the coordinator as a Chainlink Automation upkeep.");
-  console.log("   5. Put the core address into frontend/.env as REACT_APP_SEPOLIA_CONTRACT_ADDRESS.");
+  console.log("\nNext steps:");
+  console.log("1. Add this new coordinator as a consumer on your Chainlink Functions subscription.");
+  console.log("2. Update or recreate your Chainlink Automation upkeep to point at the new coordinator.");
+  console.log("3. Save this address into root .env as SKYHEDGE_SEPOLIA_COORDINATOR_ADDRESS.");
 }
 
 main().catch((error) => {

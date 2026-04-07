@@ -5,12 +5,13 @@ import {AutomationCompatible} from "@chainlink/contracts/src/v0.8/automation/Aut
 import {ConfirmedOwner} from "@chainlink/contracts/src/v0.8/shared/access/ConfirmedOwner.sol";
 import {FunctionsClient} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/FunctionsClient.sol";
 import {FunctionsRequest} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 import {ISkyHedgeCoreChainlink} from "./interfaces/ISkyHedgeCoreChainlink.sol";
 
 /**
  * @notice Sepolia-only coordinator that combines Chainlink Automation and Functions.
- *         Automation picks due ACTIVE policies, Functions queries AviationStack, and
+ *         Automation picks due ACTIVE policies, Functions queries Cirium, and
  *         fulfillRequest settles the policy through the Chainlink-only core contract.
  */
 contract SkyHedgeOracleCoordinator is FunctionsClient, AutomationCompatible, ConfirmedOwner {
@@ -176,8 +177,9 @@ contract SkyHedgeOracleCoordinator is FunctionsClient, AutomationCompatible, Con
             req.addDONHostedSecrets(donHostedSecretsSlotId, donHostedSecretsVersion);
         }
 
-        string[] memory args = new string[](1);
+        string[] memory args = new string[](2);
         args[0] = flightRef;
+        args[1] = Strings.toString(policy.departureTime);
         req.setArgs(args);
 
         requestId = _sendRequest(req.encodeCBOR(), subscriptionId, callbackGasLimit, donId);

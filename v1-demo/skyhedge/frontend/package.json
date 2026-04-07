@@ -2,6 +2,7 @@
   "name": "skyhedge-frontend",
   "version": "0.1.0",
   "private": true,
+  "proxy": "https://api.sky.cirium.com",
   "dependencies": {
     "ethers": "^6.13.0",
     "react": "^18.2.0",

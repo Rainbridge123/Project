@@ -25,7 +25,6 @@ Both positions are tokenised as **ERC-721 Bearer Instruments**:
 | `bidPremium()` — reverse auction bidding | ✅ |
 | `finalizeAuction()` — winner locks full collateral, mints NFTs | ✅ |
 | `resolvePolicy()` — oracle triggers payout or collateral release | ✅ |
-| `scripts/auto-settle.js` — local off-chain worker auto-resolves due ACTIVE policies | ✅ |
 | `SkyHedgeCoreChainlink + SkyHedgeOracleCoordinator` — Sepolia Chainlink settlement path | ✅ |
 | Policy NFT (ERC-721) | ✅ |
 | Risk NFT (ERC-721) | ✅ |
@@ -122,39 +121,7 @@ REACT_APP_SEPOLIA_DEPLOY_BLOCK=1234567
 
 Restart `npm start` after changing `.env`.
 
-### 6.1 Run the auto-settlement worker
-
-This project now includes an off-chain resolver worker that can settle eligible `ACTIVE` policies automatically on `localhost`.
-
-The worker:
-- waits until `departureTime + delayThreshold`
-- loads the flight from AviationStack using `flight_iata`
-- reads the API delay field
-- calls `resolvePolicy(policyId, delayMins)` with the resolver wallet
-
-It only queries flights for policies that are already due, and it reuses one API response per flight per polling cycle to reduce quota usage.
-
-For local testing:
-
-```bash
-npm run auto-settle:local
-```
-
-To run it once and exit:
-
-```bash
-npm run auto-settle:local:once
-```
-
-Configuration:
-- `AVIATIONSTACK_API_KEY` in root `.env`, or `REACT_APP_AVIATIONSTACK_API_KEY` in `frontend/.env`
-- `AUTO_SETTLE_POLL_MS` in root `.env` if you want a custom poll interval
-
-Important:
-- the worker must run with the same wallet address configured as `resolver` in the contract
-- if AviationStack returns no usable numeric `delay` field yet, the worker skips that policy and retries on the next poll instead of settling with a guessed value
-
-### 6.2 Deploy the Sepolia Chainlink version
+### 6.1 Deploy the Sepolia Chainlink version
 
 This repository now supports two settlement modes:
 - `localhost`: existing resolver-driven MVP flow
@@ -185,9 +152,21 @@ The deployment script will:
 After deployment you still need to:
 - fund the Functions subscription with LINK
 - add the coordinator as a Functions consumer
-- upload DON-hosted secrets for `{"apiKey":"YOUR_AVIATIONSTACK_KEY"}` and record the returned slot ID + version
+- upload DON-hosted secrets for `{"apiToken":"YOUR_CIRIUM_API_TOKEN"}` and record the returned slot ID + version
 - register the coordinator as a Chainlink Automation upkeep
 - update `frontend/.env` with the new `REACT_APP_SEPOLIA_CONTRACT_ADDRESS`
+
+If you already deployed Sepolia contracts and only need to switch the oracle integration to the latest Cirium Functions code:
+- set `SKYHEDGE_SEPOLIA_COORDINATOR_ADDRESS` in root `.env`
+- re-upload DON-hosted secrets with the new `CIRIUM_API_TOKEN`
+- run `npm run update:sepolia-coordinator`
+
+If you need a brand-new coordinator because the deployed coordinator contract itself is outdated:
+- keep your existing `SkyHedgeCoreChainlink`
+- set `SKYHEDGE_SEPOLIA_CONTRACT_ADDRESS` in root `.env`
+- run `npm run deploy:sepolia-coordinator`
+- add the new coordinator as a Functions consumer
+- update or recreate the Automation upkeep to use the new coordinator
 
 ### 7. Add Hardhat local network to MetaMask
 

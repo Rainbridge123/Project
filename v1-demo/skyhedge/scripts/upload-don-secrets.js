@@ -38,7 +38,7 @@ async function main() {
 
   const functionsRouterAddress = requiredEnv("CHAINLINK_FUNCTIONS_ROUTER");
   const donId = requiredEnv("CHAINLINK_FUNCTIONS_DON_ID");
-  const apiKey = requiredEnv("AVIATIONSTACK_API_KEY");
+  const apiToken = requiredEnv("CIRIUM_API_TOKEN");
 
   const slotId = parsePositiveInt("CHAINLINK_FUNCTIONS_DON_SECRETS_SLOT_ID", 0);
   const minutesUntilExpiration = parsePositiveInt("CHAINLINK_FUNCTIONS_DON_SECRETS_TTL_MINUTES", 1440);
@@ -68,7 +68,7 @@ async function main() {
   await secretsManager.initialize();
 
   const encryptedSecretsObj = await secretsManager.encryptSecrets({
-    apiKey,
+    apiToken,
   });
 
   const result = await secretsManager.uploadEncryptedSecretsToDON({

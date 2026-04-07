@@ -21,4 +21,6 @@ interface ISkyHedgeCoreChainlink {
     function policyCount() external view returns (uint256);
     function getPolicy(uint256 policyId) external view returns (Policy memory);
     function resolvePolicyFromOracle(uint256 policyId, uint256 delayMins) external;
+    function isRiskNFT(uint256 tokenId) external view returns (bool);
+    function nftToPolicyId(uint256 tokenId) external view returns (uint256);
 }

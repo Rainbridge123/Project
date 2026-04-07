@@ -32,8 +32,26 @@ export const EXPECTED_CHAIN_ID = ACTIVE_NETWORK.chainId;
 export const CONTRACT_ADDRESS = ACTIVE_NETWORK.contractAddress;
 export const READ_RPC_URL = ACTIVE_NETWORK.readRpcUrl;
 export const DEPLOY_BLOCK = ACTIVE_NETWORK.deployBlock;
-export const AVIATIONSTACK_API_KEY = process.env.REACT_APP_AVIATIONSTACK_API_KEY || "";
-export const AVIATIONSTACK_BASE_URL = process.env.REACT_APP_AVIATIONSTACK_BASE_URL || "https://api.aviationstack.com/v1/flights";
+export const CIRIUM_API_TOKEN = process.env.REACT_APP_CIRIUM_API_TOKEN || "";
+export const CIRIUM_BASE_URL = process.env.REACT_APP_CIRIUM_BASE_URL || "/v1";
+export const SYNDICATE_MANAGER_ADDRESS = process.env.REACT_APP_SYNDICATE_MANAGER_ADDRESS || "";
+export const SYNDICATE_MANAGER_ABI = [
+  "function vaultByPolicyId(uint256 policyId) external view returns (address)",
+  "function policyIdByVault(address vault) external view returns (uint256)"
+];
+export const RISK_VAULT_ABI = [
+  "function policyId() external view returns (uint256)",
+  "function riskNftId() external view returns (uint256)",
+  "function leadUnderwriter() external view returns (address)",
+  "function sharesForSale() external view returns (uint256)",
+  "function pricePerShare() external view returns (uint256)",
+  "function totalReward() external view returns (uint256)",
+  "function isResolved() external view returns (bool)",
+  "function shareBalances(address account) external view returns (uint256)",
+  "function buyShares(uint256 amountToBuy) external payable",
+  "function captureResolution() external",
+  "function claimReward() external"
+];
 export const COORDINATOR_ABI = [
   "function requestPolicySettlement(uint256 policyId) external returns (bytes32)",
   "function pendingRequestId() external view returns (bytes32)",
@@ -53,6 +71,7 @@ export const ABI = [
   "function resolvePolicy(uint256 policyId, uint256 delayMins) external",
   "function transferFrom(address from, address to, uint256 tokenId) external",
   "function safeTransferFrom(address from, address to, uint256 tokenId) external",
+  "function safeTransferFrom(address from, address to, uint256 tokenId, bytes data) external",
 
   // ── View functions ──────────────────────────────────────────────
   // Policy struct now includes maxPremium field
