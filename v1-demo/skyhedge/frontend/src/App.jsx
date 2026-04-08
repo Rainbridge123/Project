@@ -1138,6 +1138,7 @@ function UnderwriterTab({ contract, readContract, roleKey, addTxLog, setCurrentP
 function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCurrentPolicyId, triggerBalanceRefresh, refreshTick }) {
   const [vaultCandidates, setVaultCandidates] = useState([]);
   const [launchedPositions, setLaunchedPositions] = useState([]);
+  const [managedVaults, setManagedVaults] = useState([]);
   const [marketplaceListings, setMarketplaceListings] = useState([]);
   const [ownedSubscriptions, setOwnedSubscriptions] = useState([]);
   const [resolvedPositions, setResolvedPositions] = useState([]);
@@ -1178,6 +1179,7 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
       if (!reader || !account) {
         setVaultCandidates([]);
         setLaunchedPositions([]);
+        setManagedVaults([]);
         setMarketplaceListings([]);
         setOwnedSubscriptions([]);
         setResolvedPositions([]);
@@ -1251,6 +1253,10 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
           policy.bestUnderwriter?.toLowerCase() === normalizedAccount &&
           vaultAddress !== ethers.ZeroAddress
         );
+        const nextManagedVaults = entries.filter(({ policy, vaultAddress }) =>
+          policy.bestUnderwriter?.toLowerCase() === normalizedAccount &&
+          vaultAddress !== ethers.ZeroAddress
+        );
         const nextMarketplaceListings = entries.filter(({ ds, vaultAddress, vaultDetails }) =>
           ds === "ACTIVE" &&
           vaultAddress !== ethers.ZeroAddress &&
@@ -1271,6 +1277,7 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
 
         setVaultCandidates(sortPolicyEntries(nextVaultCandidates));
         setLaunchedPositions(sortPolicyEntries(nextLaunchedPositions));
+        setManagedVaults(sortPolicyEntries(nextManagedVaults));
         setMarketplaceListings(sortPolicyEntries(nextMarketplaceListings));
         setOwnedSubscriptions(sortPolicyEntries(nextOwnedSubscriptions));
         setResolvedPositions(sortPolicyEntries(nextResolvedPositions));
@@ -1280,6 +1287,7 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
       } catch (e) {
         setVaultCandidates([]);
         setLaunchedPositions([]);
+        setManagedVaults([]);
         setMarketplaceListings([]);
         setOwnedSubscriptions([]);
         setResolvedPositions([]);
@@ -1567,13 +1575,13 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
             <div style={{ color: "#f97316", fontSize: 12, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 12 }}>
               Your Managed Vaults
             </div>
-            {!launchedPositions.length ? (
+            {!managedVaults.length ? (
               <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.7 }}>
-                No active managed vaults yet. Once you create a marketplace listing, its policy-specific vault address will appear here.
+                No managed vaults yet. Once you create a marketplace listing, both active and historical vaults you manage will appear here.
               </div>
             ) : (
               <div style={{ display: "grid", gap: 10 }}>
-                {launchedPositions.map(({ id, policy, ds, vaultAddress }) => (
+                {managedVaults.map(({ id, policy, ds, vaultAddress }) => (
                   <div
                     key={id}
                     style={{
