@@ -1581,28 +1581,33 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
               </div>
             ) : (
               <div style={{ display: "grid", gap: 10 }}>
-                {managedVaults.map(({ id, policy, ds, vaultAddress }) => (
-                  <div
-                    key={id}
-                    style={{
-                      background: "#11161f",
-                      border: "1px solid #2d3445",
-                      borderRadius: 12,
-                      padding: "12px 14px",
-                    }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 8 }}>
-                      <div style={{ color: "#fff", fontFamily: "monospace", fontWeight: 700 }}>Policy #{id}</div>
-                      <DerivedStatusBadge ds={ds} />
+                {managedVaults.map(({ id, policy, ds, vaultAddress, vaultDetails }) => {
+                  const leadUnderwriterShares = Number(vaultDetails?.accountShares ?? 0);
+                  return (
+                    <div
+                      key={id}
+                      style={{
+                        background: "#11161f",
+                        border: "1px solid #2d3445",
+                        borderRadius: 12,
+                        padding: "12px 14px",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                        <div style={{ color: "#fff", fontFamily: "monospace", fontWeight: 700 }}>Policy #{id}</div>
+                        <DerivedStatusBadge ds={ds} />
+                      </div>
+                      <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                        <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(policy.flightRef)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.departureTime)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Lead UW Shares:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{leadUnderwriterShares}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Fixed Payout:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(policy.fixedPayout)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Risk NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>#{policy.riskNFTId.toString()}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Vault:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{vaultAddress}</span></div>
+                      </div>
                     </div>
-                    <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
-                      <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(policy.flightRef)}</span></div>
-                      <div><span style={{ color: CLR.dim }}>Fixed Payout:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(policy.fixedPayout)}</span></div>
-                      <div><span style={{ color: CLR.dim }}>Risk NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>#{policy.riskNFTId.toString()}</span></div>
-                      <div><span style={{ color: CLR.dim }}>Vault:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{vaultAddress}</span></div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>
