@@ -1123,11 +1123,19 @@ function UnderwriterTab({ contract, readContract, roleKey, addTxLog, setCurrentP
       <PolicyCard policy={policy} policyId={policyId} roleAddresses={roleAddresses} />
       {policy && (
         <div style={{ marginTop: 15 }}>
-          <input type="number" value={premium} onChange={e => setPremium(e.target.value)} style={inputStyle} />
-          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-            <button onClick={placeBid} disabled={!canBid} style={canBid ? btnStyle("#34d399") : disabledBtnStyle}>Bid</button>
-            <button onClick={finalize} disabled={!canFinalize} style={canFinalize ? btnStyle("#f59e0b") : disabledBtnStyle}>Finalize</button>
-          </div>
+          {canBid && (
+            <>
+              <input type="number" value={premium} onChange={e => setPremium(e.target.value)} style={inputStyle} />
+              <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                <button onClick={placeBid} style={btnStyle("#34d399")}>Bid</button>
+              </div>
+            </>
+          )}
+          {canFinalize && (
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              <button onClick={finalize} style={btnStyle("#f59e0b")}>Finalize</button>
+            </div>
+          )}
           <Log {...log} />
         </div>
       )}
