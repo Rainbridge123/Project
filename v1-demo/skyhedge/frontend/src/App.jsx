@@ -1367,8 +1367,22 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
   function setBuyAmount(policyId) {
     return (e) => {
       const nextValue = e.target.value;
+      if (!/^\d*$/.test(nextValue)) {
+        return;
+      }
       setBuyAmounts(current => ({ ...current, [String(policyId)]: nextValue }));
     };
+  }
+
+  function parseBuyAmount(rawAmount, sharesAvailable) {
+    if (!/^[1-9]\d*$/.test(rawAmount)) {
+      return { amount: 0, error: "Enter a whole number greater than 0." };
+    }
+    const amount = Number.parseInt(rawAmount, 10);
+    if (amount > sharesAvailable) {
+      return { amount, error: `Only ${sharesAvailable} shares are currently available.` };
+    }
+    return { amount, error: "" };
   }
 
   async function buyListingShares(entry) {
@@ -1380,15 +1394,11 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
       setLog({ msg: "", err: "Connect wallet first." });
       return;
     }
-    const rawAmount = buyAmounts[String(entry.id)] || "1";
-    const amountToBuy = Number.parseInt(rawAmount, 10) || 0;
-    if (amountToBuy <= 0) {
-      setLog({ msg: "", err: "Enter a valid share amount to buy." });
-      return;
-    }
     const sharesAvailable = Number(entry.vaultDetails?.sharesForSale ?? 0);
-    if (amountToBuy > sharesAvailable) {
-      setLog({ msg: "", err: `Only ${sharesAvailable} shares are currently available.` });
+    const rawAmount = buyAmounts[String(entry.id)] ?? "1";
+    const { amount: amountToBuy, error: buyAmountError } = parseBuyAmount(rawAmount, sharesAvailable);
+    if (buyAmountError) {
+      setLog({ msg: "", err: buyAmountError });
       return;
     }
     const pricePerShareWei = BigInt(entry.vaultDetails?.pricePerShare ?? 0);
@@ -1410,7 +1420,7 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
       const tx = await vault.buyShares(amountToBuy, { value: totalCost });
       await tx.wait();
       setLog({ msg: `Bought ${amountToBuy} share${amountToBuy === 1 ? "" : "s"} from Policy #${entry.id}.`, err: "" });
-      setBuyAmounts(current => ({ ...current, [String(entry.id)]: "" }));
+      setBuyAmounts(current => ({ ...current, [String(entry.id)]: "1" }));
       triggerBalanceRefresh?.();
     } catch (e) {
       setLog({ msg: "", err: parseError(e) });
@@ -1605,9 +1615,9 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
                 const sharesAvailable = Number(entry.vaultDetails?.sharesForSale ?? 0);
                 const accountShares = Number(entry.vaultDetails?.accountShares ?? 0);
                 const pricePerShare = BigInt(entry.vaultDetails?.pricePerShare ?? 0);
-                const buyAmount = buyAmounts[String(entry.id)] || "1";
-                const parsedBuyAmount = Number.parseInt(buyAmount, 10) || 0;
-                const totalCost = parsedBuyAmount > 0 ? pricePerShare * BigInt(parsedBuyAmount) : 0n;
+                const buyAmount = buyAmounts[String(entry.id)] ?? "1";
+                const { amount: parsedBuyAmount, error: buyAmountError } = parseBuyAmount(buyAmount, sharesAvailable);
+                const totalCost = !buyAmountError && parsedBuyAmount > 0 ? pricePerShare * BigInt(parsedBuyAmount) : 0n;
                 const isBuyingThis = buyingPolicyId === entry.id;
                 return (
                   <div key={entry.id} style={{ background: "#11161f", border: "1px solid #2d3445", borderRadius: 12, padding: "14px" }}>
@@ -1623,11 +1633,11 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
                       <div><span style={{ color: CLR.dim }}>Your Shares:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{accountShares}</span></div>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 10, alignItems: "center" }}>
-                      <input value={buyAmount} onChange={setBuyAmount(entry.id)} style={inputStyle} />
+                      <input value={buyAmount} onChange={setBuyAmount(entry.id)} inputMode="numeric" pattern="[0-9]*" style={inputStyle} />
                       <button
                         onClick={() => buyListingShares(entry)}
-                        disabled={isBuyingThis || parsedBuyAmount <= 0 || parsedBuyAmount > sharesAvailable}
-                        style={isBuyingThis || parsedBuyAmount <= 0 || parsedBuyAmount > sharesAvailable ? disabledBtnStyle : btnStyle("#38bdf8")}
+                        disabled={isBuyingThis || Boolean(buyAmountError)}
+                        style={isBuyingThis || Boolean(buyAmountError) ? disabledBtnStyle : btnStyle("#38bdf8")}
                       >
                         {isBuyingThis ? "Buying..." : `Buy for ${fmtEth(totalCost)}`}
                       </button>
