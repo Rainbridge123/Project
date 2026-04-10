@@ -6,6 +6,7 @@ const hasConfiguredAddress = Boolean(CONTRACT_ADDRESS) && ethers.isAddress(CONTR
 const readProvider = READ_RPC_URL ? new ethers.JsonRpcProvider(READ_RPC_URL) : null;
 const readOnlyContract = readProvider && hasConfiguredAddress ? new ethers.Contract(CONTRACT_ADDRESS, ABI, readProvider) : null;
 const BROWSER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "Local";
+const UI_FONT = 'monospace';
 function pad2(value) {
   return String(value).padStart(2, "0");
 }
@@ -65,7 +66,7 @@ function PassengerView({ sharedProps }) {
 function UnderwriterView({ sharedProps, roleKey }) {
   return (
     <div style={{ height: "100%", padding: "24px", background: "#0d0f14", border: "2px solid #34d399", borderRadius: "12px", boxShadow: "0 0 20px #34d39922", display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <h2 style={{ color: "#34d399", fontFamily: "monospace", textTransform: "uppercase" }}>🏦 Underwriter Terminal</h2>
+      <h2 style={{ color: "#34d399", fontFamily: UI_FONT, textTransform: "uppercase" }}>🏦 Underwriter Terminal</h2>
       <p style={{ color: "#34d399", fontSize: "12px", marginBottom: "20px" }}>[SECURE CONNECTION ACTIVE]</p>
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
         <UnderwriterTab {...sharedProps} roleKey={roleKey} />
@@ -146,7 +147,7 @@ function derivedStatus(policy) {
   const s = Number(policy.status);
   const now = Math.floor(Date.now() / 1000);
   if (s === 0) {
-    if (policy.bestUnderwriter === ethers.ZeroAddress && now >= Number(policy.expiry)) return "UNBID_EXPIRED";
+    if (now >= Number(policy.expiry)) return "EXPIRED";
     return now < Number(policy.auctionEnd) ? "BIDDING_OPEN" : "BIDDING_ENDED";
   }
   if (s === 1) return "ACTIVE";
@@ -157,7 +158,7 @@ function derivedStatus(policy) {
 const DERIVED_META = {
   BIDDING_OPEN:  { label: "BIDDING — OPEN",  color: "#f59e0b", desc: "Auction open. Underwriters can place bids now." },
   BIDDING_ENDED: { label: "BIDDING — ENDED", color: "#ef4444", desc: "Auction closed. Winning underwriter must finalize." },
-  UNBID_EXPIRED: { label: "Waiting Refund",  color: "#fb7185", desc: "No bids were placed. Passenger refund is still pending." },
+  EXPIRED:       { label: "EXPIRED",         color: "#fb7185", desc: "The policy expired before activation. Passenger can reclaim the premium escrow." },
   ACTIVE:        { label: "ACTIVE",           color: "#3b82f6", desc: "Collateral locked. Awaiting oracle resolution." },
   PAID:          { label: "Payout Paid",      color: "#22c55e", desc: "Flight delayed. Payout sent to Policy NFT holder." },
   REFUNDED_UNBID:{ label: "Refunded",         color: "#94a3b8", desc: "Unbid policy expired and the passenger premium has been refunded." },
@@ -551,6 +552,10 @@ function safeParseEther(value) {
 function sumPolicyPayouts(entries) {
   return entries.reduce((total, entry) => total + BigInt(entry?.policy?.fixedPayout ?? 0), 0n);
 }
+function isVaultLaunchWindowOpen(policy) {
+  if (!policy) return false;
+  return Math.floor(Date.now() / 1000) < Number(policy.departureTime);
+}
 function buildFallbackFinalTransfer(ds, policy, roleAddresses) {
   if (!policy) return "—";
   if (ds === "PAID") {
@@ -562,7 +567,7 @@ function buildFallbackFinalTransfer(ds, policy, roleAddresses) {
   if (ds === "REFUNDED_UNBID") {
     return `${fmtEth(policy.maxPremium)} -> ${addrDisplay(policy.passenger, roleAddresses)}`;
   }
-  if (ds === "UNBID_EXPIRED") {
+  if (ds === "EXPIRED") {
     return `${fmtEth(policy.maxPremium)} -> ${addrDisplay(policy.passenger, roleAddresses)} (pending)`;
   }
   return "—";
@@ -571,8 +576,8 @@ function describeSettlementOutcome(ds, resolutionState, policy) {
   if (ds === "PAID") return "Delayed flight";
   if (ds === "RESOLVED_ON_TIME") return "On-time flight";
   if (ds === "REFUNDED_UNBID") return "Unbid policy expired";
+  if (ds === "EXPIRED") return "Ready for passenger refund.";
   if (ds === "ACTIVE") return "Awaiting settlement.";
-  if (ds === "UNBID_EXPIRED") return "Ready for passenger refund.";
   return "Settlement details unavailable.";
 }
 function buildTxLog(role, action) {
@@ -584,13 +589,14 @@ function buildTxLog(role, action) {
   };
 }
 
-const inputStyle = { background: "#111318", border: "1px solid #2d3445", borderRadius: 6, color: "#e2e8f0", padding: "8px 12px", fontSize: 13, fontFamily: "monospace", width: "100%", outline: "none" };
-const btnStyle = (color, extra = {}) => ({ background: color + "22", border: `1px solid ${color}55`, borderRadius: 6, color, padding: "8px 18px", fontSize: 13, fontFamily: "monospace", cursor: "pointer", fontWeight: 600, ...extra });
-const disabledBtnStyle = { background: "#1a1e2a", border: "1px solid #3d4455", borderRadius: 6, color: "#94a3b8", padding: "8px 18px", fontSize: 13, fontFamily: "monospace", cursor: "not-allowed", fontWeight: 600 };
+const inputStyle = { background: "#111318", border: "1px solid #2d3445", borderRadius: 6, color: "#e2e8f0", padding: "8px 12px", fontSize: 13, fontFamily: UI_FONT, width: "100%", outline: "none" };
+const btnStyle = (color, extra = {}) => ({ background: color + "22", border: `1px solid ${color}55`, borderRadius: 6, color, padding: "8px 18px", fontSize: 13, fontFamily: UI_FONT, cursor: "pointer", fontWeight: 600, ...extra });
+const disabledBtnStyle = { background: "#1a1e2a", border: "1px solid #3d4455", borderRadius: 6, color: "#94a3b8", padding: "8px 18px", fontSize: 13, fontFamily: UI_FONT, cursor: "not-allowed", fontWeight: 600 };
 const CLR = { label: "#cbd5e1", value: "#f1f5f9", dim: "#94a3b8", head: "#f1f5f9" };
-const STATUS_PRIORITY = { ACTIVE: 0, UNBID_EXPIRED: 1, BIDDING_OPEN: 2, BIDDING_ENDED: 3, PAID: 4, RESOLVED_ON_TIME: 5, REFUNDED_UNBID: 6, UNKNOWN: 7 };
+const STATUS_PRIORITY = { ACTIVE: 0, EXPIRED: 1, BIDDING_OPEN: 2, BIDDING_ENDED: 3, PAID: 4, RESOLVED_ON_TIME: 5, REFUNDED_UNBID: 6, UNKNOWN: 7 };
 const RIGHT_PANEL_STATUS_GROUPS = [
   { key: "ACTIVE", title: "Active" },
+  { key: "EXPIRED", title: "Expired" },
   { key: "BIDDING_OPEN", title: "Bidding Open" },
   { key: "BIDDING_ENDED", title: "Bidding Ended" },
   { key: "RESOLVED", title: "Resolved" },
@@ -599,13 +605,13 @@ const RIGHT_PANEL_STATUS_GROUPS = [
 ];
 function rightPanelGroupKey(ds) {
   if (ds === "PAID" || ds === "RESOLVED_ON_TIME") return "RESOLVED";
-  if (ds === "UNBID_EXPIRED" || ds === "REFUNDED_UNBID") return "REFUND";
+  if (ds === "REFUNDED_UNBID") return "REFUND";
   return ds;
 }
 
 function DerivedStatusBadge({ ds }) {
   const m = DERIVED_META[ds] ?? DERIVED_META.UNKNOWN;
-  return <span style={{ background: m.color + "22", color: m.color, border: `1px solid ${m.color}55`, borderRadius: 4, padding: "3px 10px", fontSize: 11, fontFamily: "monospace", fontWeight: 700 }}>{m.label}</span>;
+  return <span style={{ background: m.color + "22", color: m.color, border: `1px solid ${m.color}55`, borderRadius: 4, padding: "3px 10px", fontSize: 11, fontFamily: UI_FONT, fontWeight: 700 }}>{m.label}</span>;
 }
 
 function AccountRoleBanner({ account, mode, resolverAccount }) {
@@ -617,7 +623,7 @@ function AccountRoleBanner({ account, mode, resolverAccount }) {
         <span style={{ fontSize: 16 }}>✅</span>
         <div>
           <div style={{ fontSize: 13, fontWeight: 700, color: meta.color }}>Using {meta.label} Mode</div>
-          <div style={{ fontSize: 11, fontFamily: "monospace", color: CLR.dim }}>{shortAddr(account)}</div>
+          <div style={{ fontSize: 11, fontFamily: UI_FONT, color: CLR.dim }}>{shortAddr(account)}</div>
         </div>
       </div>
     );
@@ -632,7 +638,7 @@ function AccountRoleBanner({ account, mode, resolverAccount }) {
 
 function Log({ msg, err }) {
   if (!msg && !err) return null;
-  return <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 6, background: err ? "#7f1d1d33" : "#14532d33", border: `1px solid ${err ? "#ef4444" : "#22c55e"}55`, color: err ? "#fca5a5" : "#86efac", fontSize: 13, fontFamily: "monospace" }}>{err ? "❌ " : "✅ "}{msg || err}</div>;
+  return <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 6, background: err ? "#7f1d1d33" : "#14532d33", border: `1px solid ${err ? "#ef4444" : "#22c55e"}55`, color: err ? "#fca5a5" : "#86efac", fontSize: 13, fontFamily: UI_FONT }}>{err ? "❌ " : "✅ "}{msg || err}</div>;
 }
 
 function PolicyCard({ policy, policyId, roleAddresses }) {
@@ -643,11 +649,11 @@ function PolicyCard({ policy, policyId, roleAddresses }) {
   return (
     <div style={{ background: "#1a1e2a", border: `1px solid ${dm.color}44`, borderRadius: 8, padding: "14px 18px", marginTop: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <span style={{ color: CLR.head, fontSize: 13, fontFamily: "monospace", fontWeight: 600 }}>Policy #{policyId}</span>
+        <span style={{ color: CLR.head, fontSize: 13, fontFamily: UI_FONT, fontWeight: 600 }}>Policy #{policyId}</span>
         <DerivedStatusBadge ds={ds} />
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <tbody>{rows.map(([k, v]) => (<tr key={k}><td style={{ color: CLR.label, paddingRight: 12, paddingBottom: 5, whiteSpace: "nowrap" }}>{k}</td><td style={{ color: CLR.value, fontFamily: "monospace", paddingBottom: 5 }}>{v}</td></tr>))}</tbody>
+        <tbody>{rows.map(([k, v]) => (<tr key={k}><td style={{ color: CLR.label, paddingRight: 12, paddingBottom: 5, whiteSpace: "nowrap" }}>{k}</td><td style={{ color: CLR.value, fontFamily: UI_FONT, paddingBottom: 5 }}>{v}</td></tr>))}</tbody>
       </table>
     </div>
   );
@@ -697,7 +703,7 @@ function PolicySelectionList({
     <div style={{ marginBottom: 16, padding: "14px 16px", background: "#111318", borderRadius: 8, border: "1px solid #2d3445" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div>
-          <div style={{ color: accentColor, fontSize: 13, fontWeight: 700, fontFamily: "monospace", textTransform: "uppercase" }}>{title}</div>
+          <div style={{ color: accentColor, fontSize: 13, fontWeight: 700, fontFamily: UI_FONT, textTransform: "uppercase" }}>{title}</div>
           <div style={{ color: CLR.dim, fontSize: 12 }}>{subtitle}</div>
         </div>
         <button onClick={onRefresh} style={btnStyle(accentColor)} disabled={isLoading}>
@@ -737,14 +743,14 @@ function PolicySelectionList({
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 8 }}>
-                  <span style={{ color: "#f8fafc", fontSize: 13, fontFamily: "monospace", fontWeight: 700 }}>Policy #{id}</span>
+                  <span style={{ color: "#f8fafc", fontSize: 13, fontFamily: UI_FONT, fontWeight: 700 }}>Policy #{id}</span>
                   <DerivedStatusBadge ds={ds} />
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, fontSize: 12 }}>
-                  <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(policy.flightRef)}</span></div>
-                  <div><span style={{ color: CLR.dim }}>Passenger:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{shortAddr(policy.passenger)}</span></div>
-                  <div><span style={{ color: CLR.dim }}>Best Premium:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{bestPremium}</span></div>
-                  <div><span style={{ color: CLR.dim }}>Best UW:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{addrDisplay(policy.bestUnderwriter, roleAddresses)}</span></div>
+                  <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fromBytes32(policy.flightRef)}</span></div>
+                  <div><span style={{ color: CLR.dim }}>Passenger:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{shortAddr(policy.passenger)}</span></div>
+                  <div><span style={{ color: CLR.dim }}>Best Premium:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{bestPremium}</span></div>
+                  <div><span style={{ color: CLR.dim }}>Best UW:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{addrDisplay(policy.bestUnderwriter, roleAddresses)}</span></div>
                 </div>
               </button>
             );
@@ -921,7 +927,7 @@ function PassengerTab({ contract, readContract, account, addTxLog, setCurrentPol
       <div style={{ marginBottom: 18, padding: "16px 18px", background: "#09111f", border: "1px solid #4fc3f744", borderRadius: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
           <div>
-            <div style={{ color: "#4fc3f7", fontFamily: "monospace", fontSize: 13, fontWeight: 700, textTransform: "uppercase" }}>Flight Lookup</div>
+            <div style={{ color: "#4fc3f7", fontFamily: UI_FONT, fontSize: 13, fontWeight: 700, textTransform: "uppercase" }}>Flight Lookup</div>
           </div>
           <div style={{ display: "grid", gap: 8, width: "min(100%, 520px)", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
             <div>
@@ -961,19 +967,19 @@ function PassengerTab({ contract, readContract, account, addTxLog, setCurrentPol
           </div>
         </div>
         {isManualFlightEntry && (
-          <div style={{ marginBottom: 12, color: "#fda4af", fontSize: 12, fontFamily: "monospace" }}>
+          <div style={{ marginBottom: 12, color: "#fda4af", fontSize: 12, fontFamily: UI_FONT }}>
             Lookup failed, so manual entry is now enabled for Flight Ref and Departure Time.
           </div>
         )}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, fontSize: 12 }}>
-          <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{flightInfo.flightRef}</span></div>
+          <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{flightInfo.flightRef}</span></div>
           <div><span style={{ color: CLR.dim }}>Airline:</span> <span style={{ color: CLR.value }}>{flightInfo.airline}</span></div>
           <div><span style={{ color: CLR.dim }}>Status:</span> <span style={{ color: CLR.value }}>{flightInfo.flight_status}</span></div>
-          <div><span style={{ color: CLR.dim }}>Flight Date:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{flightInfo.flight_date || "—"}</span></div>
+          <div><span style={{ color: CLR.dim }}>Flight Date:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{flightInfo.flight_date || "—"}</span></div>
           <div><span style={{ color: CLR.dim }}>Departure:</span> <span style={{ color: CLR.value }}>{flightInfo.departure_airport} {flightInfo.departure_iata ? `(${flightInfo.departure_iata})` : ""}</span></div>
           <div><span style={{ color: CLR.dim }}>Arrival:</span> <span style={{ color: CLR.value }}>{flightInfo.arrival_airport} {flightInfo.arrival_iata ? `(${flightInfo.arrival_iata})` : ""}</span></div>
-          <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{flightInfo.departure_scheduled ? formatApiTimeWithTimezone(flightInfo.departure_scheduled, flightInfo.departure_timezone) : "—"}</span></div>
-          <div><span style={{ color: CLR.dim }}>Estimated Departure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{flightInfo.departure_estimated ? formatApiTimeWithTimezone(flightInfo.departure_estimated, flightInfo.departure_timezone) : "—"}</span></div>
+          <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{flightInfo.departure_scheduled ? formatApiTimeWithTimezone(flightInfo.departure_scheduled, flightInfo.departure_timezone) : "—"}</span></div>
+          <div><span style={{ color: CLR.dim }}>Estimated Departure:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{flightInfo.departure_estimated ? formatApiTimeWithTimezone(flightInfo.departure_estimated, flightInfo.departure_timezone) : "—"}</span></div>
         </div>
         <Log {...flightLookupLog} />
       </div>
@@ -1092,7 +1098,7 @@ function UnderwriterTab({ contract, readContract, roleKey, addTxLog, setCurrentP
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 16, alignItems: "start", marginBottom: 16 }}>
         <div style={panelShellStyle}>
-          <div style={{ color: "#34d399", fontSize: 12, fontFamily: "monospace", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>Bidding Desk</div>
+          <div style={{ color: "#34d399", fontSize: 12, fontFamily: UI_FONT, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>Bidding Desk</div>
           <PolicySelectionList
             policies={policyList}
             selectedPolicyId={policyId}
@@ -1106,7 +1112,7 @@ function UnderwriterTab({ contract, readContract, roleKey, addTxLog, setCurrentP
           />
         </div>
         <div style={panelShellStyle}>
-          <div style={{ color: "#f59e0b", fontSize: 12, fontFamily: "monospace", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>Finalization Desk</div>
+          <div style={{ color: "#f59e0b", fontSize: 12, fontFamily: UI_FONT, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>Finalization Desk</div>
           <PolicySelectionList
             policies={finalizeList}
             selectedPolicyId={policyId}
@@ -1143,7 +1149,7 @@ function UnderwriterTab({ contract, readContract, roleKey, addTxLog, setCurrentP
   );
 }
 
-function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCurrentPolicyId, triggerBalanceRefresh, refreshTick }) {
+function SyndicateTab({ contract, readContract, account, addTxLog, setCurrentPolicy, setCurrentPolicyId, triggerBalanceRefresh, refreshTick }) {
   const [vaultCandidates, setVaultCandidates] = useState([]);
   const [launchedPositions, setLaunchedPositions] = useState([]);
   const [managedVaults, setManagedVaults] = useState([]);
@@ -1154,6 +1160,7 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
   const [isLoading, setIsLoading] = useState(false);
   const [isLaunching, setIsLaunching] = useState(false);
   const [buyingPolicyId, setBuyingPolicyId] = useState(null);
+  const [vaultActionState, setVaultActionState] = useState({ policyId: null, type: "" });
   const [log, setLog] = useState({ msg: "", err: "" });
   const [blueprint, setBlueprint] = useState({
     sharesForSale: "60",
@@ -1231,14 +1238,15 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
               const vaultReader = getRiskVaultContract(reader, vaultAddress);
               if (vaultReader) {
                 try {
-                  const [sharesForSale, pricePerShare, leadUnderwriter, accountShares, isResolved] = await Promise.all([
+                  const [sharesForSale, pricePerShare, leadUnderwriter, accountShares, isResolved, totalReward] = await Promise.all([
                     vaultReader.sharesForSale(),
                     vaultReader.pricePerShare(),
                     vaultReader.leadUnderwriter(),
                     vaultReader.shareBalances(account),
                     vaultReader.isResolved(),
+                    vaultReader.totalReward(),
                   ]);
-                  vaultDetails = { sharesForSale, pricePerShare, leadUnderwriter, accountShares, isResolved };
+                  vaultDetails = { sharesForSale, pricePerShare, leadUnderwriter, accountShares, isResolved, totalReward };
                 } catch {
                   vaultDetails = null;
                 }
@@ -1252,6 +1260,7 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
         const entries = loaded.filter(Boolean);
         const nextVaultCandidates = entries.filter(({ policy, ds, riskOwner, vaultAddress }) =>
           ds === "ACTIVE" &&
+          isVaultLaunchWindowOpen(policy) &&
           policy.bestUnderwriter?.toLowerCase() === normalizedAccount &&
           riskOwner?.toLowerCase() === normalizedAccount &&
           vaultAddress === ethers.ZeroAddress
@@ -1265,8 +1274,9 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
           policy.bestUnderwriter?.toLowerCase() === normalizedAccount &&
           vaultAddress !== ethers.ZeroAddress
         );
-        const nextMarketplaceListings = entries.filter(({ ds, vaultAddress, vaultDetails }) =>
+        const nextMarketplaceListings = entries.filter(({ policy, ds, vaultAddress, vaultDetails }) =>
           ds === "ACTIVE" &&
+          isVaultLaunchWindowOpen(policy) &&
           vaultAddress !== ethers.ZeroAddress &&
           vaultDetails &&
           Number(vaultDetails.sharesForSale) > 0 &&
@@ -1354,6 +1364,10 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
       setLog({ msg: "", err: "Total listing value cannot exceed the same percentage of fixed payout." });
       return;
     }
+    if (!isVaultLaunchWindowOpen(selectedVaultCandidate.policy)) {
+      setLog({ msg: "", err: "Scheduled departure has passed. Vault launch is no longer allowed for this policy." });
+      return;
+    }
     setIsLaunching(true);
     setLog({ msg: `Creating listing for Policy #${selectedVaultCandidate.id}...`, err: "" });
     try {
@@ -1401,6 +1415,103 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
     return { amount, error: "" };
   }
 
+  function estimateSharePayout(totalReward, shareCount) {
+    const reward = BigInt(totalReward ?? 0);
+    const shares = BigInt(shareCount ?? 0);
+    if (reward <= 0n || shares <= 0n) return 0n;
+    return (reward * shares) / 100n;
+  }
+
+  async function captureVaultResolution(entry) {
+    if (!entry?.vaultAddress) {
+      setLog({ msg: "", err: "Vault address is missing for this policy." });
+      return;
+    }
+    if (!contract || !account) {
+      setLog({ msg: "", err: "Connect wallet first." });
+      return;
+    }
+    const vault = getRiskVaultContract(contract, entry.vaultAddress);
+    if (!vault) {
+      setLog({ msg: "", err: "Vault contract is not available." });
+      return;
+    }
+
+    setVaultActionState({ policyId: entry.id, type: "capture" });
+    setLog({ msg: `Capturing settlement outcome for Policy #${entry.id}...`, err: "" });
+    try {
+      const tx = await vault.captureResolution();
+      await tx.wait();
+      addTxLog?.(buildTxLog("syndicate", `Captured vault settlement for Policy #${entry.id}`));
+      setLog({ msg: `Vault settlement captured for Policy #${entry.id}.`, err: "" });
+      triggerBalanceRefresh?.();
+    } catch (e) {
+      setLog({ msg: "", err: parseError(e) });
+    } finally {
+      setVaultActionState({ policyId: null, type: "" });
+    }
+  }
+
+  async function claimVaultReward(entry) {
+    if (!entry?.vaultAddress) {
+      setLog({ msg: "", err: "Vault address is missing for this policy." });
+      return;
+    }
+    if (!contract || !account) {
+      setLog({ msg: "", err: "Connect wallet first." });
+      return;
+    }
+    const vault = getRiskVaultContract(contract, entry.vaultAddress);
+    if (!vault) {
+      setLog({ msg: "", err: "Vault contract is not available." });
+      return;
+    }
+
+    setVaultActionState({ policyId: entry.id, type: "claim" });
+    setLog({ msg: `Claiming vault reward for Policy #${entry.id}...`, err: "" });
+    try {
+      const tx = await vault.claimReward();
+      await tx.wait();
+      addTxLog?.(buildTxLog("syndicate", `Claimed vault reward from Policy #${entry.id}`));
+      setLog({ msg: `Reward claimed from Policy #${entry.id}.`, err: "" });
+      triggerBalanceRefresh?.();
+    } catch (e) {
+      setLog({ msg: "", err: parseError(e) });
+    } finally {
+      setVaultActionState({ policyId: null, type: "" });
+    }
+  }
+
+  async function releaseManagedRiskNft(entry) {
+    if (!entry?.vaultAddress) {
+      setLog({ msg: "", err: "Vault address is missing for this policy." });
+      return;
+    }
+    if (!contract || !account) {
+      setLog({ msg: "", err: "Connect wallet first." });
+      return;
+    }
+    const vault = getRiskVaultContract(contract, entry.vaultAddress);
+    if (!vault) {
+      setLog({ msg: "", err: "Vault contract is not available." });
+      return;
+    }
+
+    setVaultActionState({ policyId: entry.id, type: "release" });
+    setLog({ msg: `Releasing Risk NFT for Policy #${entry.id} back to your wallet...`, err: "" });
+    try {
+      const tx = await vault.releaseRiskNft(account);
+      await tx.wait();
+      addTxLog?.(buildTxLog("syndicate", `Released Risk NFT for Policy #${entry.id} back to the lead underwriter`));
+      setLog({ msg: `Risk NFT released from Policy #${entry.id} to ${shortAddr(account)}.`, err: "" });
+      triggerBalanceRefresh?.();
+    } catch (e) {
+      setLog({ msg: "", err: parseError(e) });
+    } finally {
+      setVaultActionState({ policyId: null, type: "" });
+    }
+  }
+
   async function buyListingShares(entry) {
     if (!entry?.vaultAddress) {
       setLog({ msg: "", err: "Vault address is missing for this listing." });
@@ -1408,6 +1519,10 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
     }
     if (!contract || !account) {
       setLog({ msg: "", err: "Connect wallet first." });
+      return;
+    }
+    if (!isVaultLaunchWindowOpen(entry.policy)) {
+      setLog({ msg: "", err: "Scheduled departure has passed. Marketplace share purchases are closed for this policy." });
       return;
     }
     const sharesAvailable = Number(entry.vaultDetails?.sharesForSale ?? 0);
@@ -1449,13 +1564,13 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
     <div style={{ display: "grid", gap: 18 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 }}>
         {[
-          { label: "Vault-Ready Positions", value: String(vaultCandidates.length), tone: "#fb923c", sub: "ACTIVE policies where you still hold the Risk NFT" },
+          { label: "Vault-Ready Positions", value: String(vaultCandidates.length), tone: "#fb923c", sub: "ACTIVE policies before scheduled departure where you still hold the Risk NFT" },
           { label: "Listed Risk Vaults", value: String(launchedPositions.length), tone: "#f97316", sub: `${fmtEth(launchedCollateralWei)} of risk now listed through the marketplace` },
           { label: "Open Marketplace", value: String(marketplaceListings.length), tone: "#38bdf8", sub: `${fmtEth(marketplaceCollateralWei)} of external risk currently available to subscribe` },
           { label: "Your Positions", value: String(ownedSubscriptions.length), tone: "#22c55e", sub: `${fmtEth(subscribedExposureWei)} of subscribed risk tracked in your portfolio` },
         ].map(card => (
           <div key={card.label} style={{ background: "#0d1118", border: `1px solid ${card.tone}44`, borderRadius: 16, padding: "16px 18px" }}>
-            <div style={{ color: card.tone, fontSize: 11, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>{card.label}</div>
+            <div style={{ color: card.tone, fontSize: 11, fontFamily: UI_FONT, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>{card.label}</div>
             <div style={{ color: "#fff7ed", fontSize: 28, fontWeight: 700, marginBottom: 6 }}>{card.value}</div>
             <div style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.5 }}>{card.sub}</div>
           </div>
@@ -1467,8 +1582,8 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
           <section style={shellStyle}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
               <div>
-                <div style={{ color: "#fb923c", fontSize: 12, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>Vault Launchpad</div>
-                <div style={{ color: "#94a3b8", fontSize: 12 }}>Policies that are already underwritten by you and ready to move into a dedicated vault.</div>
+                <div style={{ color: "#fb923c", fontSize: 12, fontFamily: UI_FONT, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>Vault Launchpad</div>
+                <div style={{ color: "#94a3b8", fontSize: 12 }}>Policies that are already underwritten by you and still before scheduled departure.</div>
               </div>
               <button onClick={triggerBalanceRefresh} style={btnStyle("#fb923c")}>
                 {isLoading ? "Refreshing..." : "Refresh"}
@@ -1499,14 +1614,14 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
                       }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
-                        <div style={{ color: "#fff", fontSize: 14, fontFamily: "monospace", fontWeight: 700 }}>Policy #{id}</div>
+                        <div style={{ color: "#fff", fontSize: 14, fontFamily: UI_FONT, fontWeight: 700 }}>Policy #{id}</div>
                         <DerivedStatusBadge ds={ds} />
                       </div>
                       <div style={{ display: "grid", gap: 5, fontSize: 12 }}>
-                        <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(policy.flightRef)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.departureTime)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Fixed Payout:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(policy.fixedPayout)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Risk NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>#{policy.riskNFTId.toString()}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fromBytes32(policy.flightRef)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{tsToLocal(policy.departureTime)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Fixed Payout:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fmtEth(policy.fixedPayout)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Risk NFT:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>#{policy.riskNFTId.toString()}</span></div>
                       </div>
                     </button>
                   );
@@ -1516,20 +1631,20 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
           </section>
 
           <section style={{ ...shellStyle, background: "linear-gradient(180deg, #151b23 0%, #0d1118 100%)" }}>
-            <div style={{ color: "#fdba74", fontSize: 12, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 10 }}>
+            <div style={{ color: "#fdba74", fontSize: 12, fontFamily: UI_FONT, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 10 }}>
               Listing Builder
             </div>
             {selectedPolicy ? (
               <>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 12 }}>
-                  <div><span style={{ color: CLR.dim }}>Flight Number:</span><div style={{ color: "#fff7ed", fontFamily: "monospace", marginTop: 4 }}>{fromBytes32(selectedPolicy.flightRef)}</div></div>
-                  <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span><div style={{ color: "#fff7ed", fontFamily: "monospace", marginTop: 4 }}>{tsToLocal(selectedPolicy.departureTime)}</div></div>
+                  <div><span style={{ color: CLR.dim }}>Flight Number:</span><div style={{ color: "#fff7ed", fontFamily: UI_FONT, marginTop: 4 }}>{fromBytes32(selectedPolicy.flightRef)}</div></div>
+                  <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span><div style={{ color: "#fff7ed", fontFamily: UI_FONT, marginTop: 4 }}>{tsToLocal(selectedPolicy.departureTime)}</div></div>
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 16 }}>
-                  <div><span style={{ color: CLR.dim }}>Risk NFT:</span><div style={{ color: "#fff7ed", fontFamily: "monospace", marginTop: 4 }}>#{selectedPolicy.riskNFTId.toString()}</div></div>
-                  <div><span style={{ color: CLR.dim }}>Fixed Payout:</span><div style={{ color: "#fff7ed", fontFamily: "monospace", marginTop: 4 }}>{fmtEth(selectedPolicy.fixedPayout)}</div></div>
-                  <div><span style={{ color: CLR.dim }}>Best Premium:</span><div style={{ color: "#fff7ed", fontFamily: "monospace", marginTop: 4 }}>{fmtEth(selectedPolicy.bestPremium)}</div></div>
+                  <div><span style={{ color: CLR.dim }}>Risk NFT:</span><div style={{ color: "#fff7ed", fontFamily: UI_FONT, marginTop: 4 }}>#{selectedPolicy.riskNFTId.toString()}</div></div>
+                  <div><span style={{ color: CLR.dim }}>Fixed Payout:</span><div style={{ color: "#fff7ed", fontFamily: UI_FONT, marginTop: 4 }}>{fmtEth(selectedPolicy.fixedPayout)}</div></div>
+                  <div><span style={{ color: CLR.dim }}>Best Premium:</span><div style={{ color: "#fff7ed", fontFamily: UI_FONT, marginTop: 4 }}>{fmtEth(selectedPolicy.bestPremium)}</div></div>
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 16 }}>
@@ -1560,12 +1675,17 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
                 <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
                   <button
                     onClick={launchSyndicate}
-                    disabled={isLaunching || !selectedVaultCandidate || selectedVaultCandidate.vaultAddress !== ethers.ZeroAddress || !managerConfigured || sharePriceWei === null || sharesForSale <= 0 || !listingValueValid}
-                    style={isLaunching || !selectedVaultCandidate || selectedVaultCandidate.vaultAddress !== ethers.ZeroAddress || !managerConfigured || sharePriceWei === null || sharesForSale <= 0 || !listingValueValid ? disabledBtnStyle : btnStyle("#fb923c")}
+                    disabled={isLaunching || !selectedVaultCandidate || selectedVaultCandidate.vaultAddress !== ethers.ZeroAddress || !managerConfigured || sharePriceWei === null || sharesForSale <= 0 || !listingValueValid || !isVaultLaunchWindowOpen(selectedVaultCandidate.policy)}
+                    style={isLaunching || !selectedVaultCandidate || selectedVaultCandidate.vaultAddress !== ethers.ZeroAddress || !managerConfigured || sharePriceWei === null || sharesForSale <= 0 || !listingValueValid || !isVaultLaunchWindowOpen(selectedVaultCandidate.policy) ? disabledBtnStyle : btnStyle("#fb923c")}
                   >
                     {isLaunching ? "Creating..." : "Create Listing"}
                   </button>
                 </div>
+                {!isVaultLaunchWindowOpen(selectedPolicy) && (
+                  <div style={{ marginTop: 12, color: "#fda4af", fontSize: 12, lineHeight: 1.6 }}>
+                    Scheduled departure has already passed, so this policy can no longer be launched into a vault.
+                  </div>
+                )}
                 {!listingValueValid && selectedPolicy && (
                   <div style={{ marginTop: 12, color: "#fda4af", fontSize: 12, lineHeight: 1.6 }}>
                     Listing value is too high. If you sell {sharesForSale}% of the risk side, the total raise must stay at or below {fmtEth(maxRaiseWei)}.
@@ -1580,7 +1700,7 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
           </section>
 
           <section style={shellStyle}>
-            <div style={{ color: "#f97316", fontSize: 12, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 12 }}>
+            <div style={{ color: "#f97316", fontSize: 12, fontFamily: UI_FONT, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 12 }}>
               Your Managed Vaults
             </div>
             {!managedVaults.length ? (
@@ -1589,8 +1709,17 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
               </div>
             ) : (
               <div style={{ display: "grid", gap: 10 }}>
-                {managedVaults.map(({ id, policy, ds, vaultAddress, vaultDetails }) => {
+                {managedVaults.map(({ id, policy, ds, riskOwner, vaultAddress, vaultDetails }) => {
                   const leadUnderwriterShares = Number(vaultDetails?.accountShares ?? 0);
+                  const totalReward = BigInt(vaultDetails?.totalReward ?? 0);
+                  const estimatedLeadClaim = estimateSharePayout(totalReward, leadUnderwriterShares);
+                  const isCapturing = vaultActionState.policyId === id && vaultActionState.type === "capture";
+                  const isClaiming = vaultActionState.policyId === id && vaultActionState.type === "claim";
+                  const isReleasing = vaultActionState.policyId === id && vaultActionState.type === "release";
+                  const canCapture = (ds === "PAID" || ds === "RESOLVED_ON_TIME") && !vaultDetails?.isResolved;
+                  const canClaim = ds === "RESOLVED_ON_TIME" && vaultDetails?.isResolved && totalReward > 0n && leadUnderwriterShares > 0;
+                  const canRelease = vaultDetails?.isResolved && riskOwner?.toLowerCase() === vaultAddress.toLowerCase();
+                  const showManagedVaultActions = canCapture || canClaim || canRelease;
                   return (
                     <div
                       key={id}
@@ -1602,17 +1731,66 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
                       }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 8 }}>
-                        <div style={{ color: "#fff", fontFamily: "monospace", fontWeight: 700 }}>Policy #{id}</div>
+                        <div style={{ color: "#fff", fontFamily: UI_FONT, fontWeight: 700 }}>Policy #{id}</div>
                         <DerivedStatusBadge ds={ds} />
                       </div>
                       <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
-                        <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(policy.flightRef)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.departureTime)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Lead UW Shares:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{leadUnderwriterShares}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Fixed Payout:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(policy.fixedPayout)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Risk NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>#{policy.riskNFTId.toString()}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Vault:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{vaultAddress}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fromBytes32(policy.flightRef)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{tsToLocal(policy.departureTime)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Lead UW Shares:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{leadUnderwriterShares}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Fixed Payout:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fmtEth(policy.fixedPayout)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Vault Reward Pool:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fmtEth(totalReward)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Lead Claimable:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fmtEth(estimatedLeadClaim)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Risk NFT:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>#{policy.riskNFTId.toString()}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Risk NFT Owner:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{shortAddr(riskOwner)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Vault:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{vaultAddress}</span></div>
                       </div>
+                      {showManagedVaultActions && (
+                        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+                          {canCapture && (
+                            <button
+                              onClick={() => captureVaultResolution({ id, policy, ds, riskOwner, vaultAddress, vaultDetails })}
+                              disabled={isCapturing || isClaiming || isReleasing}
+                              style={!isCapturing && !isClaiming && !isReleasing ? btnStyle("#f97316") : disabledBtnStyle}
+                            >
+                              {isCapturing ? "Capturing..." : "Capture Resolution"}
+                            </button>
+                          )}
+                          {canClaim && (
+                            <button
+                              onClick={() => claimVaultReward({ id, policy, ds, riskOwner, vaultAddress, vaultDetails })}
+                              disabled={isCapturing || isClaiming || isReleasing}
+                              style={!isCapturing && !isClaiming && !isReleasing ? btnStyle("#22c55e") : disabledBtnStyle}
+                            >
+                              {isClaiming ? "Claiming..." : `Claim ${fmtEth(estimatedLeadClaim)}`}
+                            </button>
+                          )}
+                          {canRelease && (
+                            <button
+                              onClick={() => releaseManagedRiskNft({ id, policy, ds, riskOwner, vaultAddress, vaultDetails })}
+                              disabled={isCapturing || isClaiming || isReleasing}
+                              style={!isCapturing && !isClaiming && !isReleasing ? btnStyle("#facc15") : disabledBtnStyle}
+                            >
+                              {isReleasing ? "Releasing..." : "Release Risk NFT"}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {canCapture && (
+                        <div style={{ marginTop: 10, color: "#fdba74", fontSize: 12, lineHeight: 1.6 }}>
+                          Core settlement has finished. Capture the vault outcome here before any withdrawal can happen.
+                        </div>
+                      )}
+                      {!canCapture && canClaim && (
+                        <div style={{ marginTop: 10, color: "#86efac", fontSize: 12, lineHeight: 1.6 }}>
+                          Your vault return is ready. Claim your share from this policy here.
+                        </div>
+                      )}
+                      {!canCapture && !canClaim && canRelease && (
+                        <div style={{ marginTop: 10, color: "#fde68a", fontSize: 12, lineHeight: 1.6 }}>
+                          The vault is finished with this policy. You can release the Risk NFT back to your wallet now.
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1623,7 +1801,7 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
 
         <div style={{ display: "grid", gap: 18 }}>
           <section style={shellStyle}>
-          <div style={{ color: "#38bdf8", fontSize: 12, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 12 }}>
+          <div style={{ color: "#38bdf8", fontSize: 12, fontFamily: UI_FONT, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 12 }}>
             Open Marketplace
           </div>
           {!marketplaceListings.length ? (
@@ -1643,15 +1821,15 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
                 return (
                   <div key={entry.id} style={{ background: "#11161f", border: "1px solid #2d3445", borderRadius: 12, padding: "14px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
-                      <div style={{ color: "#fff", fontFamily: "monospace", fontWeight: 700 }}>Policy #{entry.id}</div>
+                      <div style={{ color: "#fff", fontFamily: UI_FONT, fontWeight: 700 }}>Policy #{entry.id}</div>
                       <DerivedStatusBadge ds={entry.ds} />
                     </div>
                     <div style={{ display: "grid", gap: 5, fontSize: 12, marginBottom: 12 }}>
-                      <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(entry.policy.flightRef)}</span></div>
-                      <div><span style={{ color: CLR.dim }}>Lead UW:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{shortAddr(entry.vaultDetails?.leadUnderwriter)}</span></div>
-                      <div><span style={{ color: CLR.dim }}>Shares Available:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{sharesAvailable}</span></div>
-                      <div><span style={{ color: CLR.dim }}>Price / Share:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(pricePerShare)}</span></div>
-                      <div><span style={{ color: CLR.dim }}>Your Shares:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{accountShares}</span></div>
+                      <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fromBytes32(entry.policy.flightRef)}</span></div>
+                      <div><span style={{ color: CLR.dim }}>Lead UW:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{shortAddr(entry.vaultDetails?.leadUnderwriter)}</span></div>
+                      <div><span style={{ color: CLR.dim }}>Shares Available:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{sharesAvailable}</span></div>
+                      <div><span style={{ color: CLR.dim }}>Price / Share:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fmtEth(pricePerShare)}</span></div>
+                      <div><span style={{ color: CLR.dim }}>Your Shares:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{accountShares}</span></div>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 10, alignItems: "center" }}>
                       <input value={buyAmount} onChange={setBuyAmount(entry.id)} inputMode="numeric" pattern="[0-9]*" style={inputStyle} />
@@ -1671,7 +1849,7 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
           </section>
 
           <section style={shellStyle}>
-            <div style={{ color: "#22c55e", fontSize: 12, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 12 }}>
+            <div style={{ color: "#22c55e", fontSize: 12, fontFamily: UI_FONT, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, marginBottom: 12 }}>
               Your Risk Positions
             </div>
             {!ownedSubscriptions.length ? (
@@ -1683,8 +1861,15 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
                 {ownedSubscriptions.map(({ id, policy, ds, vaultAddress, vaultDetails }) => {
                   const accountShares = Number(vaultDetails?.accountShares ?? 0);
                   const pricePerShare = BigInt(vaultDetails?.pricePerShare ?? 0);
+                  const totalReward = BigInt(vaultDetails?.totalReward ?? 0);
                   const costBasisWei = pricePerShare * BigInt(accountShares);
                   const collateralExposureWei = (BigInt(policy.fixedPayout ?? 0) * BigInt(accountShares)) / 100n;
+                  const estimatedClaimWei = estimateSharePayout(totalReward, accountShares);
+                  const isCapturing = vaultActionState.policyId === id && vaultActionState.type === "capture";
+                  const isClaiming = vaultActionState.policyId === id && vaultActionState.type === "claim";
+                  const canCapture = (ds === "PAID" || ds === "RESOLVED_ON_TIME") && !vaultDetails?.isResolved;
+                  const canClaim = ds === "RESOLVED_ON_TIME" && vaultDetails?.isResolved && totalReward > 0n && accountShares > 0;
+                  const showSubscriptionActions = canCapture || canClaim;
                   return (
                     <div
                       key={id}
@@ -1696,18 +1881,51 @@ function SyndicateTab({ contract, readContract, account, setCurrentPolicy, setCu
                       }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 8 }}>
-                        <div style={{ color: "#fff", fontFamily: "monospace", fontWeight: 700 }}>Policy #{id}</div>
+                        <div style={{ color: "#fff", fontFamily: UI_FONT, fontWeight: 700 }}>Policy #{id}</div>
                         <DerivedStatusBadge ds={ds} />
                       </div>
                       <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
-                        <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(policy.flightRef)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.departureTime)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Your Shares:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{accountShares}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Avg Price / Share:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(pricePerShare)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Cost Basis:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(costBasisWei)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Risk Exposure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(collateralExposureWei)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Vault:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{vaultAddress}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fromBytes32(policy.flightRef)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{tsToLocal(policy.departureTime)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Your Shares:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{accountShares}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Avg Price / Share:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fmtEth(pricePerShare)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Cost Basis:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fmtEth(costBasisWei)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Risk Exposure:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fmtEth(collateralExposureWei)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Claimable Return:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fmtEth(estimatedClaimWei)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Vault:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{vaultAddress}</span></div>
                       </div>
+                      {showSubscriptionActions && (
+                        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+                          {canCapture && (
+                            <button
+                              onClick={() => captureVaultResolution({ id, policy, ds, vaultAddress, vaultDetails })}
+                              disabled={isCapturing || isClaiming}
+                              style={!isCapturing && !isClaiming ? btnStyle("#38bdf8") : disabledBtnStyle}
+                            >
+                              {isCapturing ? "Capturing..." : "Capture Resolution"}
+                            </button>
+                          )}
+                          {canClaim && (
+                            <button
+                              onClick={() => claimVaultReward({ id, policy, ds, vaultAddress, vaultDetails })}
+                              disabled={isCapturing || isClaiming}
+                              style={!isCapturing && !isClaiming ? btnStyle("#22c55e") : disabledBtnStyle}
+                            >
+                              {isClaiming ? "Claiming..." : `Claim ${fmtEth(estimatedClaimWei)}`}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {canCapture && (
+                        <div style={{ marginTop: 10, color: "#7dd3fc", fontSize: 12, lineHeight: 1.6 }}>
+                          Settlement is already final in the core contract. Capture the vault outcome before claiming.
+                        </div>
+                      )}
+                      {!canCapture && canClaim && (
+                        <div style={{ marginTop: 10, color: "#86efac", fontSize: 12, lineHeight: 1.6 }}>
+                          Your proportional collateral return is ready. Claim it from this vault here.
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1848,7 +2066,7 @@ function ResolverTab({ contract, readContract, addTxLog, setCurrentPolicy, setCu
       <PolicyCard policy={policy} policyId={policyId} roleAddresses={roleAddresses} />
       {policy && (
         <div style={{ marginTop: 15 }}>
-          <div style={{ marginBottom: 10, color: canResolve ? "#fcd34d" : "#94a3b8", fontSize: 12, fontFamily: "monospace" }}>
+          <div style={{ marginBottom: 10, color: canResolve ? "#fcd34d" : "#94a3b8", fontSize: 12, fontFamily: UI_FONT }}>
             {resolveWindowMessage}
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
@@ -1917,7 +2135,9 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
                   ? isSettlementWindowOpen(entry.policy)
                     ? "Ready to resolve from API"
                     : `Resolve unlocks at ${tsToLocal(settlementReadyTs(entry.policy))}`
-                  : "Waiting for finalization or already settled",
+                  : entry.ds === "EXPIRED"
+                    ? "Expired"
+                    : "Waiting for finalization or already settled",
               }));
           }
         } else if (activeMode === "underwriter") {
@@ -1944,6 +2164,8 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
                     ? "Underwritten by you"
                     : ds === "BIDDING_ENDED"
                       ? "Waiting for your finalization"
+                      : ds === "EXPIRED"
+                        ? "Expired"
                       : ds === "PAID" || ds === "RESOLVED_ON_TIME"
                         ? "Previously underwritten by you"
                         : "You are currently winning"
@@ -1961,6 +2183,8 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
                   ? "Underwritten by you"
                   : ds === "BIDDING_ENDED"
                     ? "Waiting for your finalization"
+                    : ds === "EXPIRED"
+                      ? "Expired"
                     : ds === "PAID" || ds === "RESOLVED_ON_TIME"
                       ? "Previously underwritten by you"
                       : "You are currently winning",
@@ -2159,7 +2383,7 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
     try {
       const tx = await contract.expireUnbidPolicy(targetPolicyId);
       await tx.wait();
-      addTxLog?.(buildTxLog("passenger", `Refunded expired unbid Policy #${targetPolicyId}`));
+      addTxLog?.(buildTxLog("passenger", `Refunded expired Policy #${targetPolicyId}`));
       setPanelActionState({ policyId: targetPolicyId, msg: "Refunded successfully!", err: "" });
       triggerBalanceRefresh?.();
     } catch (e) {
@@ -2234,7 +2458,7 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
   return (
     <div style={{ flex: 2, background: "#0d0f14", borderLeft: "1px solid #1e2330", overflowY: "auto", padding: "16px", minWidth: 0, minHeight: 0 }}>
       <h3 style={{ fontSize: 13, color: panelMeta.accent, marginBottom: 15 }}>{panelMeta.title}</h3>
-      {panelError && <div style={{ marginBottom: 12, padding: "10px 12px", background: "#7c2d1222", border: "1px solid #ef444444", borderRadius: 6, color: "#fca5a5", fontSize: 12, fontFamily: "monospace" }}>{panelError}</div>}
+      {panelError && <div style={{ marginBottom: 12, padding: "10px 12px", background: "#7c2d1222", border: "1px solid #ef444444", borderRadius: 6, color: "#fca5a5", fontSize: 12, fontFamily: UI_FONT }}>{panelError}</div>}
       {isLoading ? (
         <div style={{ color: CLR.dim, fontSize: 13, marginBottom: 16 }}>Loading related policies...</div>
       ) : !relatedPolicies.length ? (
@@ -2244,11 +2468,11 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
           {groupedPolicies.map(group => (
             <section key={group.key}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <div style={{ color: panelMeta.accent, fontSize: 12, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", whiteSpace: "nowrap" }}>
+                <div style={{ color: panelMeta.accent, fontSize: 12, fontFamily: UI_FONT, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", whiteSpace: "nowrap" }}>
                   {group.title}
                 </div>
                 <div style={{ flex: 1, height: 1, background: "#253041" }} />
-                <div style={{ color: CLR.dim, fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap" }}>
+                <div style={{ color: CLR.dim, fontSize: 11, fontFamily: UI_FONT, whiteSpace: "nowrap" }}>
                   {group.entries.length} {group.entries.length === 1 ? "policy" : "policies"}
                 </div>
               </div>
@@ -2258,7 +2482,10 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
                   const isExpanded = String(expandedPolicyId) === String(id);
                   const bestPremium = (!policy.maxPremium || policy.bestPremium === policy.maxPremium) ? "(no bids yet)" : fmtEth(policy.bestPremium);
                   const shouldShowRelation = relation && relation !== "Created by you";
-                  const canRefundFromRightPanel = activeMode === "passenger" && ds === "UNBID_EXPIRED" && policy.passenger?.toLowerCase() === account?.toLowerCase();
+                  const canRefundFromRightPanel =
+                    activeMode === "passenger" &&
+                    ds === "EXPIRED" &&
+                    policy.passenger?.toLowerCase() === account?.toLowerCase();
                   const canRequestSettlementFromRightPanel =
                     ACTIVE_NETWORK_KEY === "sepolia" &&
                     (activeMode === "passenger" || activeMode === "underwriter") &&
@@ -2314,41 +2541,41 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
                       style={{ padding: "12px", background: "#0d0f14", borderRadius: 8, border: `1px solid ${isActiveSelection || isExpanded ? panelMeta.accent + "88" : "#2d3445"}`, width: "100%", textAlign: "left", cursor: "pointer" }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                        <span style={{ color: "#fff", fontFamily: "monospace", fontSize: 13, fontWeight: 700 }}>Policy #{id}</span>
+                        <span style={{ color: "#fff", fontFamily: UI_FONT, fontSize: 13, fontWeight: 700 }}>Policy #{id}</span>
                         <DerivedStatusBadge ds={ds} />
                       </div>
                       {shouldShowRelation && <div style={{ color: panelMeta.accent, fontSize: 12, marginBottom: 8 }}>{relation}</div>}
                       <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
-                        <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fromBytes32(policy.flightRef)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.departureTime)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Passenger:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{shortAddr(policy.passenger)}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Best Premium:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{bestPremium}</span></div>
-                        <div><span style={{ color: CLR.dim }}>Best UW:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{addrDisplay(policy.bestUnderwriter, roleAddresses)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Flight:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fromBytes32(policy.flightRef)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Scheduled Departure:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{tsToLocal(policy.departureTime)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Passenger:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{shortAddr(policy.passenger)}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Best Premium:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{bestPremium}</span></div>
+                        <div><span style={{ color: CLR.dim }}>Best UW:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{addrDisplay(policy.bestUnderwriter, roleAddresses)}</span></div>
                       </div>
                       {isExpanded && (
                         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #253041", display: "grid", gap: 4, fontSize: 12 }}>
-                          <div><span style={{ color: CLR.dim }}>Fixed Payout:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(policy.fixedPayout)}</span></div>
-                          <div><span style={{ color: CLR.dim }}>Delay Threshold:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{String(policy.delayThreshold)} min</span></div>
-                          <div><span style={{ color: CLR.dim }}>Auction Ends:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.auctionEnd)}</span></div>
-                          <div><span style={{ color: CLR.dim }}>Expiry:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{tsToLocal(policy.expiry)}</span></div>
-                          <div><span style={{ color: CLR.dim }}>Max Premium:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{fmtEth(policy.maxPremium)}</span></div>
-                          <div><span style={{ color: CLR.dim }}>Policy NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{policy.policyNFTId > 0n ? `#${policy.policyNFTId}` : "(not minted)"}</span></div>
-                          <div><span style={{ color: CLR.dim }}>Risk NFT:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{policy.riskNFTId > 0n ? `#${policy.riskNFTId}` : "(not minted)"}</span></div>
-                          {(resolutionState || auctionState || decodedLastDelay !== null || ds === "PAID" || ds === "RESOLVED_ON_TIME" || ds === "UNBID_EXPIRED") && ds !== "REFUNDED_UNBID" && (
+                          <div><span style={{ color: CLR.dim }}>Fixed Payout:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fmtEth(policy.fixedPayout)}</span></div>
+                          <div><span style={{ color: CLR.dim }}>Delay Threshold:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{String(policy.delayThreshold)} min</span></div>
+                          <div><span style={{ color: CLR.dim }}>Auction Ends:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{tsToLocal(policy.auctionEnd)}</span></div>
+                          <div><span style={{ color: CLR.dim }}>Expiry:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{tsToLocal(policy.expiry)}</span></div>
+                          <div><span style={{ color: CLR.dim }}>Max Premium:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{fmtEth(policy.maxPremium)}</span></div>
+                          <div><span style={{ color: CLR.dim }}>Policy NFT:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{policy.policyNFTId > 0n ? `#${policy.policyNFTId}` : "(not minted)"}</span></div>
+                          <div><span style={{ color: CLR.dim }}>Risk NFT:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{policy.riskNFTId > 0n ? `#${policy.riskNFTId}` : "(not minted)"}</span></div>
+                          {(resolutionState || auctionState || decodedLastDelay !== null || ds === "PAID" || ds === "RESOLVED_ON_TIME" || ds === "EXPIRED") && ds !== "REFUNDED_UNBID" && (
                             <div style={{ marginTop: 8, paddingTop: 10, borderTop: "1px solid #253041", display: "grid", gap: 4 }}>
-                              <div style={{ color: panelMeta.accent, fontSize: 12, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase", marginBottom: 2 }}>
+                              <div style={{ color: panelMeta.accent, fontSize: 12, fontFamily: UI_FONT, fontWeight: 700, textTransform: "uppercase", marginBottom: 2 }}>
                                 Settlement Summary
                               </div>
                               <div><span style={{ color: CLR.dim }}>Outcome:</span> <span style={{ color: CLR.value }}>{describeSettlementOutcome(ds, resolutionState, policy)}</span></div>
-                              <div><span style={{ color: CLR.dim }}>Delay Used:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{decodedLastDelay === null ? "—" : `${decodedLastDelay} min`}</span></div>
-                              <div><span style={{ color: CLR.dim }}>Final Transfer:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{finalTransferText}</span></div>
-                              {resolutionState?.txHash && <div><span style={{ color: CLR.dim }}>Settlement Tx:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{shortAddr(resolutionState.txHash)}</span></div>}
-                              {auctionState?.txHash && <div><span style={{ color: CLR.dim }}>Auction Finalized Tx:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{shortAddr(auctionState.txHash)}</span></div>}
+                              <div><span style={{ color: CLR.dim }}>Delay Used:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{decodedLastDelay === null ? "—" : `${decodedLastDelay} min`}</span></div>
+                              <div><span style={{ color: CLR.dim }}>Final Transfer:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{finalTransferText}</span></div>
+                              {resolutionState?.txHash && <div><span style={{ color: CLR.dim }}>Settlement Tx:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{shortAddr(resolutionState.txHash)}</span></div>}
+                              {auctionState?.txHash && <div><span style={{ color: CLR.dim }}>Auction Finalized Tx:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{shortAddr(auctionState.txHash)}</span></div>}
                             </div>
                           )}
                           {shouldShowSettlementBlock && (
                             <div style={{ marginTop: 8 }}>
-                              <div style={{ color: isSettlementUnlocked ? "#fcd34d" : "#94a3b8", fontSize: 12, marginBottom: 8, fontFamily: "monospace" }}>
+                              <div style={{ color: isSettlementUnlocked ? "#fcd34d" : "#94a3b8", fontSize: 12, marginBottom: 8, fontFamily: UI_FONT }}>
                                 {canRequestSettlementFromRightPanel
                                   ? isPendingForThisPolicy
                                     ? "Chainlink request is pending. Refreshing the page will keep showing this pending state."
@@ -2360,10 +2587,10 @@ function RightPanel({ contract, readContract, roleAddresses, currentPolicyId, tx
                                   : "Only the passenger or winning underwriter can request Chainlink settlement."}
                               </div>
                               <div style={{ display: "grid", gap: 4, marginBottom: 8, fontSize: 12 }}>
-                                <div><span style={{ color: CLR.dim }}>Pending Request:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{policySettlementState.pendingRequestId !== ethers.ZeroHash ? shortAddr(policySettlementState.pendingRequestId) : "—"}</span></div>
-                                <div><span style={{ color: CLR.dim }}>Last Request:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{policySettlementState.lastRequestId !== ethers.ZeroHash ? shortAddr(policySettlementState.lastRequestId) : "—"}</span></div>
-                                <div><span style={{ color: CLR.dim }}>Last Delay:</span> <span style={{ color: CLR.value, fontFamily: "monospace" }}>{decodedLastDelay === null ? "—" : `${decodedLastDelay} min`}</span></div>
-                                <div><span style={{ color: CLR.dim }}>Last Error:</span> <span style={{ color: decodedLastError ? "#fca5a5" : CLR.value, fontFamily: "monospace", wordBreak: "break-word" }}>{decodedLastError || "—"}</span></div>
+                                <div><span style={{ color: CLR.dim }}>Pending Request:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{policySettlementState.pendingRequestId !== ethers.ZeroHash ? shortAddr(policySettlementState.pendingRequestId) : "—"}</span></div>
+                                <div><span style={{ color: CLR.dim }}>Last Request:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{policySettlementState.lastRequestId !== ethers.ZeroHash ? shortAddr(policySettlementState.lastRequestId) : "—"}</span></div>
+                                <div><span style={{ color: CLR.dim }}>Last Delay:</span> <span style={{ color: CLR.value, fontFamily: UI_FONT }}>{decodedLastDelay === null ? "—" : `${decodedLastDelay} min`}</span></div>
+                                <div><span style={{ color: CLR.dim }}>Last Error:</span> <span style={{ color: decodedLastError ? "#fca5a5" : CLR.value, fontFamily: UI_FONT, wordBreak: "break-word" }}>{decodedLastError || "—"}</span></div>
                               </div>
                               <button
                                 onClick={e => {
@@ -2538,7 +2765,7 @@ export default function App() {
           </button>
         </div>
       </header>
-      {connLog && <div style={{ margin: "12px 20px 0", padding: "10px 14px", background: "#7c2d1222", border: "1px solid #ef444444", borderRadius: 6, color: "#fca5a5", fontSize: 13, fontFamily: "monospace" }}>⚠️ {connLog}</div>}
+      {connLog && <div style={{ margin: "12px 20px 0", padding: "10px 14px", background: "#7c2d1222", border: "1px solid #ef444444", borderRadius: 6, color: "#fca5a5", fontSize: 13, fontFamily: UI_FONT }}>⚠️ {connLog}</div>}
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         <div style={{ flex: activeMode === "syndicate" ? 1 : 3, padding: "20px", minWidth: 0, minHeight: 0, overflow: "hidden" }}>

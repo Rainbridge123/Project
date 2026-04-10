@@ -50,7 +50,8 @@ export const RISK_VAULT_ABI = [
   "function shareBalances(address account) external view returns (uint256)",
   "function buyShares(uint256 amountToBuy) external payable",
   "function captureResolution() external",
-  "function claimReward() external"
+  "function claimReward() external",
+  "function releaseRiskNft(address to) external"
 ];
 export const COORDINATOR_ABI = [
   "function requestPolicySettlement(uint256 policyId) external returns (bytes32)",

@@ -25,8 +25,8 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
  *   Risk NFT   → right to receive collateral back if flight is on time
  *
  * Status machine:
- *   BIDDING → (finalizeAuction) → ACTIVE → (resolvePolicy) → PAID | EXPIRED
- *           ↘ (expireUnbidPolicy) → EXPIRED
+ *   BIDDING → (finalizeAuction before expiry) → ACTIVE → (resolvePolicy) → PAID | EXPIRED
+ *           ↘ (expireUnbidPolicy after expiry) → EXPIRED
  */
 contract SkyHedgeCore is ERC721, ReentrancyGuard {
 
@@ -194,6 +194,7 @@ contract SkyHedgeCore is ERC721, ReentrancyGuard {
         Policy storage policy = policies[policyId];
         require(policy.status == Status.BIDDING,           "Policy not in BIDDING phase");
         require(block.timestamp >= policy.auctionEnd,      "Auction has not ended yet");
+        require(block.timestamp < policy.expiry,           "Policy has expired");
         require(policy.bestUnderwriter != address(0),      "No bids were placed");
         require(msg.sender == policy.bestUnderwriter,      "Only winning underwriter can finalize");
         require(msg.value == policy.fixedPayout,           "msg.value must equal fixedPayout");
@@ -235,14 +236,13 @@ contract SkyHedgeCore is ERC721, ReentrancyGuard {
     }
 
     /**
-     * @notice Expires an unbid policy after its expiry time and refunds maxPremium to passenger.
-     * @dev    Only the original passenger may reclaim escrow once the policy has expired with no bids.
+     * @notice Expires any still-unfinalized policy after its expiry time and refunds maxPremium to passenger.
+     * @dev    Only the original passenger may reclaim escrow once the policy has passed expiry in BIDDING.
      */
     function expireUnbidPolicy(uint256 policyId) external nonReentrant {
         Policy storage policy = policies[policyId];
         require(policy.status == Status.BIDDING,      "Policy not in BIDDING phase");
         require(block.timestamp >= policy.expiry,     "Policy has not expired yet");
-        require(policy.bestUnderwriter == address(0), "Policy has bids");
         require(msg.sender == policy.passenger,       "Only passenger can refund");
 
         uint256 refund = policy.maxPremium;

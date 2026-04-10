@@ -61,6 +61,7 @@ contract PerPolicyRiskVault is ReentrancyGuard, IERC721Receiver {
         ISkyHedgeCoreChainlink.Policy memory policy = skyHedgeCore.getPolicy(policyId_);
         require(policy.passenger != address(0), "Policy does not exist");
         require(policy.status == STATUS_ACTIVE, "Policy must be ACTIVE");
+        require(block.timestamp < policy.departureTime, "Vault launch window closed");
         require(policy.riskNFTId > 0, "Risk NFT not minted");
         require(policy.bestUnderwriter == leadUnderwriter_, "Lead is not winning underwriter");
         require(initialSharesForSale > 0 && initialSharesForSale <= TOTAL_SHARES, "Invalid initial shares");
@@ -95,6 +96,7 @@ contract PerPolicyRiskVault is ReentrancyGuard, IERC721Receiver {
 
         ISkyHedgeCoreChainlink.Policy memory policy = skyHedgeCore.getPolicy(policyId);
         require(policy.status == STATUS_ACTIVE, "Policy no longer ACTIVE");
+        require(block.timestamp < policy.departureTime, "Vault launch window closed");
         require(policy.riskNFTId == tokenId, "Risk NFT mismatch");
         require(policy.bestUnderwriter == leadUnderwriter, "Lead underwriter changed");
 
@@ -106,6 +108,11 @@ contract PerPolicyRiskVault is ReentrancyGuard, IERC721Receiver {
     function buyShares(uint256 amountToBuy) external payable nonReentrant {
         require(riskNftDeposited, "Deposit Risk NFT first");
         require(!isResolved, "Policy already resolved");
+
+        ISkyHedgeCoreChainlink.Policy memory policy = skyHedgeCore.getPolicy(policyId);
+        require(policy.status == STATUS_ACTIVE, "Policy no longer ACTIVE");
+        require(block.timestamp < policy.departureTime, "Share purchase window closed");
+
         require(amountToBuy > 0, "Amount must be > 0");
         require(pricePerShare > 0, "Listing not configured");
         require(amountToBuy <= sharesForSale, "Not enough shares for sale");

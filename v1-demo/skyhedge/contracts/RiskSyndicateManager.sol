@@ -55,6 +55,7 @@ contract RiskSyndicateManager is IERC721Receiver {
         ISkyHedgeCoreChainlink.Policy memory policy = skyHedgeCore.getPolicy(policyId);
         require(policy.passenger != address(0), "Policy does not exist");
         require(policy.status == STATUS_ACTIVE, "Policy must be ACTIVE");
+        require(block.timestamp < policy.departureTime, "Vault launch window closed");
         require(policy.riskNFTId == tokenId, "Risk NFT mismatch");
         require(policy.bestUnderwriter == from, "Only winning underwriter can launch");
 

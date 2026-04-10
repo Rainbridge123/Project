@@ -151,6 +151,7 @@ contract SkyHedgeCoreChainlink is ERC721, ReentrancyGuard {
         Policy storage policy = policies[policyId];
         require(policy.status == Status.BIDDING,           "Policy not in BIDDING phase");
         require(block.timestamp >= policy.auctionEnd,      "Auction has not ended yet");
+        require(block.timestamp < policy.expiry,           "Policy has expired");
         require(policy.bestUnderwriter != address(0),      "No bids were placed");
         require(msg.sender == policy.bestUnderwriter,      "Only winning underwriter can finalize");
         require(msg.value == policy.fixedPayout,           "msg.value must equal fixedPayout");
@@ -191,7 +192,6 @@ contract SkyHedgeCoreChainlink is ERC721, ReentrancyGuard {
         Policy storage policy = policies[policyId];
         require(policy.status == Status.BIDDING,      "Policy not in BIDDING phase");
         require(block.timestamp >= policy.expiry,     "Policy has not expired yet");
-        require(policy.bestUnderwriter == address(0), "Policy has bids");
         require(msg.sender == policy.passenger,       "Only passenger can refund");
 
         uint256 refund = policy.maxPremium;
